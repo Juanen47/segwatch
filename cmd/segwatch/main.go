@@ -137,12 +137,12 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print results as JSON")
 	conc := fs.Int("concurrency", 8, "parallel checks")
 	rate := fs.Int("rate", 20, "checks started per second")
-	source := fs.String("source", "", "fixed source address for checks (default: chosen by the kernel)")
+	source := fs.String("source", "", "fixed source address for checks, one IPv4 and/or one IPv6, comma-separated (default: chosen by the kernel)")
 	pol, ok := loadPolicy(fs, args, stderr)
 	if !ok {
 		return 2
 	}
-	src, err := parseOptionalAddr(*source)
+	src, err := parseSources(*source)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -161,7 +161,7 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	results := runner.Run(ctx, checks, runner.Options{Concurrency: *conc, PerSecond: *rate, Source: src})
+	results := runner.Run(ctx, checks, runner.Options{Concurrency: *conc, PerSecond: *rate, Sources: src})
 	if *asJSON {
 		writeJSON(stdout, results)
 	} else {

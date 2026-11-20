@@ -129,3 +129,57 @@ func TestExampleValidates(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDualStack(t *testing.T) {
+	p, err := Parse([]byte(`
+version: 1
+networks:
+  guests:  { cidr: 10.0.30.0/24, cidr6: "fd00:30::/64", probe: { name: pg, address: 10.0.30.5, address6: "fd00:30::5" } }
+  servers: { cidr: 10.0.10.0/24, cidr6: "fd00:10::/64", probe: { name: ps, address: 10.0.10.5, address6: "fd00:10::5" } }
+  v6only:  { cidr6: "fd00:99::/64", probe: { name: p6, address6: "fd00:99::5" } }
+targets:
+  nas: { address: 10.0.10.20, address6: "fd00:10::20", network: servers }
+flows:
+  - { name: g-s, from: guests, to: servers, ports: [22/tcp, icmp], expect: deny }
+  - { name: g-nas, from: guests, to: nas, ports: [445/tcp], expect: deny }
+  - { name: g-6, from: guests, to: v6only, ports: [22/tcp], expect: deny }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs, _ := p.ChecksFrom("guests")
+	var ids []string
+	for _, c := range cs {
+		ids = append(ids, c.ID()+"="+c.Address.String())
+	}
+	want := []string{
+		"g-s:guests->servers:22/tcp=10.0.10.5", "g-s:guests->servers:icmp=10.0.10.5",
+		"g-s:guests->servers:22/tcp@ipv6=fd00:10::5", "g-s:guests->servers:icmp@ipv6=fd00:10::5",
+		"g-nas:guests->nas:445/tcp=10.0.10.20", "g-nas:guests->nas:445/tcp@ipv6=fd00:10::20",
+		"g-6:guests->v6only:22/tcp@ipv6=fd00:99::5",
+	}
+	if strings.Join(ids, " ") != strings.Join(want, " ") {
+		t.Errorf("checks:\n got %v\nwant %v", ids, want)
+	}
+}
+
+func TestDualStackInvalid(t *testing.T) {
+	_, err := Parse([]byte(`
+version: 1
+networks:
+  a: { cidr: 10.0.0.0/24, cidr6: 10.1.0.0/24, probe: { name: pa, address: 10.0.0.5, address6: 10.0.0.6 } }
+  b: { probe: { name: pb } }
+targets:
+  t: { address6: "fd00:1::1", network: a }
+flows: []
+`))
+	if err == nil {
+		t.Fatal("want error")
+	}
+	for _, want := range []string{`cidr6 "10.1.0.0/24" is not IPv6`, "address6 10.0.0.6 is not IPv6",
+		`network "b": cidr or cidr6 is required`, "address6 fd00:1::1 is outside 10.0.0.0/24"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not mention %q:\n%v", want, err)
+		}
+	}
+}

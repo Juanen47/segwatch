@@ -1,0 +1,30 @@
+# Dual-stack overlay for the lab: IPV6=1 ./lab.sh up (needs IPv6 in the
+# Docker host's kernel; Docker Desktop and WSL2 have it).
+services:
+  controller:
+    command: [controller, -p, /lab/policy-ipv6.yaml, --data, /lab/data, --listen, ":8443", --metrics, ":9469"]
+    networks:
+      mgmt:    { ipv4_address: 172.31.10.10, ipv6_address: "fd00:31:10::10" }
+      servers: { ipv4_address: 172.31.20.10, ipv6_address: "fd00:31:20::10" }
+      guests:  { ipv4_address: 172.31.30.10, ipv6_address: "fd00:31:30::10" }
+  probe-mgmt:
+    networks:
+      mgmt:    { ipv4_address: 172.31.10.5, ipv6_address: "fd00:31:10::5" }
+      servers: { ipv4_address: 172.31.20.6, ipv6_address: "fd00:31:20::6" }
+  probe-servers:
+    networks:
+      servers: { ipv4_address: 172.31.20.5, ipv6_address: "fd00:31:20::5" }
+  probe-guests:
+    networks:
+      guests:  { ipv4_address: 172.31.30.5, ipv6_address: "fd00:31:30::5" }
+  web:
+    networks:
+      servers: { ipv4_address: 172.31.20.20, ipv6_address: "fd00:31:20::20" }
+  alerts:
+    networks:
+      mgmt: { ipv4_address: 172.31.10.30, ipv6_address: "fd00:31:10::30" }
+
+networks:
+  mgmt:    { enable_ipv6: true, ipam: { config: [{ subnet: 172.31.10.0/24 }, { subnet: "fd00:31:10::/64" }] } }
+  servers: { enable_ipv6: true, ipam: { config: [{ subnet: 172.31.20.0/24 }, { subnet: "fd00:31:20::/64" }] } }
+  guests:  { enable_ipv6: true, ipam: { config: [{ subnet: 172.31.30.0/24 }, { subnet: "fd00:31:30::/64" }] } }

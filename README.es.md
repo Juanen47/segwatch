@@ -234,6 +234,43 @@ cd examples/lab
 ./lab.sh down
 ```
 
+`IPV6=1 ./lab.sh up` (con el mismo prefijo en cada comando) monta el
+laboratorio en doble pila, con 24 pruebas: cada una por IPv4 y por IPv6.
+Necesita IPv6 en el equipo de Docker, que Docker Desktop y WSL2 tienen.
+
+## IPv6 y redes doble pila
+
+En una red doble pila, IPv6 suele recibir menos atención en el cortafuegos
+que IPv4: la VLAN está aislada por IPv4 y por IPv6 pasa todo. segwatch prueba
+las dos. Pon a la red `cidr6` y a su sonda `address6` (y a un target
+`address6`), y cada flujo hacia ella se prueba una vez por familia:
+
+```yaml
+networks:
+  guests:  { cidr: 10.0.30.0/24, cidr6: "fd00:30::/64",
+             probe: { name: probe-guests, address: 10.0.30.5, address6: "fd00:30::5" } }
+targets:
+  nas: { address: 10.0.10.20, address6: "fd00:10::20", network: servers }
+```
+
+Las pruebas IPv6 tienen un ID que acaba en `@ipv6`. Salen como `22/tcp v6` en
+el informe, con `family="ipv6"` en Prometheus y con «(IPv6)» en Checkmk. Una
+red también puede ser solo IPv6 (`cidr6` y `address6` sin más). En una sonda
+con varias interfaces, fija el origen por familia:
+`--source 10.0.30.5,fd00:30::5`.
+
+## Instalar
+
+Descarga la versión de tu plataforma en
+[Releases](https://github.com/Juanen47/segwatch/releases): Linux amd64, arm64
+y armv7 (Raspberry Pi), y FreeBSD amd64 (OPNsense, pfSense). Cada una es un
+único binario estático. Comprueba la descarga antes de ejecutarla:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify segwatch_*_linux_amd64.tar.gz --repo Juanen47/segwatch   # compilado por la CI del repo
+```
+
 ## Compilar
 
 ```sh
@@ -251,7 +288,8 @@ go test ./...
 - [x] Avisos: webhook, ntfy, Healthchecks
 - [x] Informe HTML con la matriz esperado frente a observado
 - [x] Check local de Checkmk y métricas de Prometheus
-- [ ] Flujos IPv6 y binarios publicados
+- [x] Flujos IPv6 y redes doble pila
+- [x] Binarios publicados con sumas de comprobación y procedencia de la compilación
 
 ## Uso responsable
 

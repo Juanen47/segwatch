@@ -30,15 +30,27 @@ import (
 
 const dbFile = "segwatch.db"
 
-func parseOptionalAddr(s string) (netip.Addr, error) {
+// parseSources parses "--source 10.0.30.5" or "--source 10.0.30.5,fd00:30::5":
+// at most one address per family.
+func parseSources(s string) ([]netip.Addr, error) {
 	if s == "" {
-		return netip.Addr{}, nil
+		return nil, nil
 	}
-	a, err := netip.ParseAddr(s)
-	if err != nil {
-		return netip.Addr{}, fmt.Errorf("invalid address %q", s)
+	var out []netip.Addr
+	seen := map[bool]bool{}
+	for _, part := range strings.Split(s, ",") {
+		a, err := netip.ParseAddr(strings.TrimSpace(part))
+		if err != nil {
+			return nil, fmt.Errorf("invalid source address %q", part)
+		}
+		a = a.Unmap()
+		if seen[a.Is4()] {
+			return nil, fmt.Errorf("--source takes at most one IPv4 and one IPv6 address")
+		}
+		seen[a.Is4()] = true
+		out = append(out, a)
 	}
-	return a, nil
+	return out, nil
 }
 
 func newLogger(w io.Writer, debug bool) *slog.Logger {
@@ -319,7 +331,7 @@ func cmdProbe(ctx context.Context, args []string, stderr io.Writer) int {
 	fp := fs.String("fingerprint", "", "controller certificate fingerprint, sha256:... (required)")
 	tokenFile := fs.String("token-file", "", "file holding this probe's token (required)")
 	bind := fs.String("bind", "", "address the responder listens on (default: all)")
-	source := fs.String("source", "", "fixed source address for checks")
+	source := fs.String("source", "", "fixed source address for checks; one IPv4 and/or one IPv6, comma-separated")
 	debug := fs.Bool("debug", false, "verbose logging")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -337,7 +349,7 @@ func cmdProbe(ctx context.Context, args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	src, err := parseOptionalAddr(*source)
+	src, err := parseSources(*source)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -346,7 +358,7 @@ func cmdProbe(ctx context.Context, args []string, stderr io.Writer) int {
 	log.Info("probe starting", "controller", *ctrl)
 	err = agent.Run(ctx, agent.Config{
 		Controller: *ctrl, Fingerprint: *fp, Token: strings.TrimSpace(string(raw)),
-		Bind: *bind, Source: src, Log: log,
+		Bind: *bind, Sources: src, Log: log,
 	})
 	if err != nil {
 		log.Error("probe", "err", err)

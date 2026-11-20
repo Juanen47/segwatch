@@ -29,8 +29,8 @@ type Config struct {
 	Controller  string // https://host:port
 	Fingerprint string // sha256:<hex> of the controller certificate
 	Token       string
-	Bind        string     // address for the responder, "" for all
-	Source      netip.Addr // optional fixed source address for checks
+	Bind        string       // address for the responder, "" for all
+	Sources     []netip.Addr // optional fixed source addresses for checks, one per family
 	Log         *slog.Logger
 	Client      *http.Client // optional, for tests
 	RetryAfter  time.Duration
@@ -81,7 +81,7 @@ func Run(ctx context.Context, cfg Config) error {
 			}
 			if len(job.Checks) > 0 {
 				started := time.Now().UTC()
-				results := runner.Run(ctx, job.Checks, runner.Options{Source: cfg.Source})
+				results := runner.Run(ctx, job.Checks, runner.Options{Sources: cfg.Sources})
 				if err := sendReport(ctx, cfg.Client, base, cfg.Token, started, results); err != nil {
 					cfg.Log.Error("send report", "err", err)
 				} else {

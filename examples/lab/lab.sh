@@ -3,8 +3,14 @@
 # one real web server and an alert receiver.
 # Usage: ./lab.sh up | status | drift | heal | alerts | report | metrics |
 #        checkmk | down
+# Dual-stack (every check over IPv4 and IPv6): IPV6=1 ./lab.sh <command>
 set -eu
 cd "$(dirname "$0")"
+POLICY=policy.yaml
+if [ "${IPV6:-0}" = 1 ]; then
+  POLICY=policy-ipv6.yaml
+  export COMPOSE_FILE=compose.yaml:compose.ipv6.yaml
+fi
 sw() { docker compose exec -T controller /segwatch "$@"; }
 
 case "${1:-up}" in
@@ -14,7 +20,7 @@ up)
   docker compose build -q
   run() { docker run --rm -u 65534:65534 -v "$PWD:/lab" segwatch-lab "$@"; }
   for p in probe-mgmt probe-servers probe-guests; do
-    [ -s "data/tokens/$p" ] || run token add -p /lab/policy.yaml --data /lab/data "$p" > "data/tokens/$p"
+    [ -s "data/tokens/$p" ] || run token add -p /lab/$POLICY --data /lab/data "$p" > "data/tokens/$p"
   done
   chmod 644 data/tokens/*
   FP=$(run fingerprint --data /lab/data | awk '{print $NF}')
@@ -26,13 +32,17 @@ up)
 status) sw status --data /lab/data --stale 1m ;;
 drift)
   # simulate a firewall mistake: guests can now reach the servers network
-  docker network connect --ip 172.31.20.99 segwatch-lab_servers segwatch-lab-probe-guests-1
+  if [ "${IPV6:-0}" = 1 ]; then
+    docker network connect --ip 172.31.20.99 --ip6 fd00:31:20::99 segwatch-lab_servers segwatch-lab-probe-guests-1
+  else
+    docker network connect --ip 172.31.20.99 segwatch-lab_servers segwatch-lab-probe-guests-1
+  fi
   echo "guests probe now has a leg in servers; wait ~20s, then: ./lab.sh status" ;;
 heal)
   docker network disconnect segwatch-lab_servers segwatch-lab-probe-guests-1
   echo "fixed; wait ~20s, then: ./lab.sh status" ;;
 report)
-  sw report -p /lab/policy.yaml --data /lab/data -o /lab/data/report.html || true
+  sw report -p /lab/$POLICY --data /lab/data -o /lab/data/report.html || true
   cp data/report.html report.html && echo "open examples/lab/report.html" ;;
 metrics) docker compose exec -T alerts wget -qO- http://172.31.10.10:9469/metrics ;;
 checkmk) sw checkmk --data /lab/data --stale 1m ;;

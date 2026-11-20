@@ -1,0 +1,60 @@
+name: release
+
+# Builds static binaries and publishes a GitHub release.
+# Start it by pushing a tag (git tag v0.1.0 && git push origin v0.1.0) or from
+# the Actions tab with "Run workflow" and a version: the tag is then created
+# on the commit the workflow runs on.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # create the release and its tag
+      id-token: write      # sign the build provenance
+      attestations: write  # store the provenance attestation
+    env:
+      VERSION: ${{ github.event.inputs.version || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: check version
+        run: echo "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'
+      - name: allow unprivileged ping for ICMP checks
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
+      - run: go test -race ./...
+      - name: build
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 linux/arm/7 freebsd/amd64; do
+            IFS=/ read -r os arch arm <<< "$target"
+            name="segwatch_${VERSION#v}_${os}_${arch}${arm:+v$arm}"
+            mkdir -p "build/$name"
+            GOOS=$os GOARCH=$arch GOARM=$arm CGO_ENABLED=0 go build -trimpath \
+              -ldflags "-s -w -X main.version=$VERSION" -o "build/$name/segwatch" ./cmd/segwatch
+            cp LICENSE README.md README.es.md SECURITY.md SECURITY.es.md "build/$name/"
+            tar -C build -czf "dist/$name.tar.gz" "$name"
+          done
+          (cd dist && sha256sum *.tar.gz > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$VERSION" dist/* --target "$GITHUB_SHA" \
+            --title "segwatch $VERSION" --generate-notes
