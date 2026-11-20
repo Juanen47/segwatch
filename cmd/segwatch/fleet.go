@@ -148,6 +148,8 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 		log.Info("metrics listening", "addr", *metrics, "path", "/metrics")
 	}
 	if len(pol.Alerts) > 0 {
+		// Hold alerts for the first heartbeat period while probes come up.
+		alerts.Quiet(time.Now().Add(heartbeatEvery(interval)))
 		go heartbeat(ctx, st, alerts, interval, *stale, log)
 	}
 
@@ -164,9 +166,10 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 // heartbeat sends the overall status to the alert channels once per policy
 // interval (at least every 5 minutes, so a silent probe is noticed soon).
 // The first one waits a full period, so probes have time to report.
+func heartbeatEvery(interval time.Duration) time.Duration { return min(interval, 5*time.Minute) }
+
 func heartbeat(ctx context.Context, st *store.Store, d *alert.Dispatcher, interval, stale time.Duration, log *slog.Logger) {
-	every := min(interval, 5*time.Minute)
-	t := time.NewTicker(every)
+	t := time.NewTicker(heartbeatEvery(interval))
 	defer t.Stop()
 	for {
 		select {
@@ -312,7 +315,11 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 			if now.Sub(c.Seen) > *stale {
 				mark += " (stale)"
 			}
-			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mark, c.Flow, c.Port, c.Expect, c.Outcome,
+			port := c.Port
+			if strings.HasSuffix(c.CheckID, "@ipv6") {
+				port += " (IPv6)"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", mark, c.Flow, port, c.Expect, c.Outcome,
 				c.Since.Format(time.RFC3339), c.Seen.Format(time.RFC3339))
 		}
 		tw.Flush()

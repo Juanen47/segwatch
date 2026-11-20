@@ -60,13 +60,15 @@ type Dispatcher struct {
 	// probe is reported as silent. It must match the one used for Status.
 	StaleAfter time.Duration
 
-	mu     sync.Mutex
-	stale  map[string]bool
-	wg     sync.WaitGroup
-	sleep  func(time.Duration) // for tests
-	failed atomic.Int64
-	once   sync.Once
-	queues []chan func()
+	mu         sync.Mutex
+	stale      map[string]bool
+	quietUntil time.Time // see Quiet
+	quietDone  bool
+	wg         sync.WaitGroup
+	sleep      func(time.Duration) // for tests
+	failed     atomic.Int64
+	once       sync.Once
+	queues     []chan func()
 }
 
 // New returns a dispatcher for the policy's alert channels.
@@ -126,7 +128,31 @@ func FromChanges(cs []store.Change) []Event {
 }
 
 // Notify sends events to every ntfy and webhook channel.
+// Quiet holds back state-change alerts until t. Use it at controller start:
+// probes come up one by one, and a check against a probe whose responder is
+// not listening yet fails for a moment. The first heartbeat at or after t
+// sends whatever is still failing, so a real problem is not lost.
+func (d *Dispatcher) Quiet(t time.Time) {
+	d.mu.Lock()
+	d.quietUntil, d.quietDone = t, false
+	d.mu.Unlock()
+}
+
 func (d *Dispatcher) Notify(events []Event) {
+	if len(events) == 0 {
+		return
+	}
+	d.mu.Lock()
+	quiet := time.Now().Before(d.quietUntil)
+	d.mu.Unlock()
+	if quiet {
+		d.Log.Debug("alerts held during startup", "events", len(events))
+		return
+	}
+	d.notify(events)
+}
+
+func (d *Dispatcher) notify(events []Event) {
 	if len(events) == 0 {
 		return
 	}
@@ -149,6 +175,15 @@ func (d *Dispatcher) Heartbeat(st api.Status) {
 		d.stale = map[string]bool{}
 	}
 	var events []Event
+	if !d.quietUntil.IsZero() && !d.quietDone && !st.Generated.Before(d.quietUntil) {
+		// End of the startup quiet period: report what is still failing.
+		d.quietDone = true
+		for _, c := range st.Checks {
+			if !c.Pass {
+				events = append(events, stateEvent(c, "failing", c.Seen))
+			}
+		}
+	}
 	now := map[string]bool{}
 	for _, c := range st.Checks {
 		if st.Generated.Sub(c.Seen) > d.StaleAfter {
@@ -162,7 +197,7 @@ func (d *Dispatcher) Heartbeat(st api.Status) {
 	}
 	d.stale = now
 	d.mu.Unlock()
-	d.Notify(events)
+	d.notify(events)
 
 	for i, a := range d.Alerts {
 		if a.Type != "healthchecks" {

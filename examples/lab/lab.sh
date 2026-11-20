@@ -7,6 +7,7 @@
 set -eu
 cd "$(dirname "$0")"
 POLICY=policy.yaml
+export FP="${FP:-unset}" # set for real by "up"; keeps compose quiet otherwise
 if [ "${IPV6:-0}" = 1 ]; then
   POLICY=policy-ipv6.yaml
   export COMPOSE_FILE=compose.yaml:compose.ipv6.yaml
@@ -47,6 +48,6 @@ report)
 metrics) docker compose exec -T alerts wget -qO- http://172.31.10.10:9469/metrics ;;
 checkmk) sw checkmk --data /lab/data --stale 1m ;;
 alerts) docker compose exec -T alerts cat /tmp/alerts.log 2>/dev/null || echo "no alerts yet" ;;
-down) FP=x docker compose down -v; rm -rf data segwatch report.html ;;
+down) docker compose down -v; rm -rf data segwatch report.html ;;
 *) echo "usage: $0 up|status|drift|heal|alerts|report|metrics|checkmk|down" >&2; exit 2 ;;
 esac
