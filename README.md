@@ -4,8 +4,8 @@
 talk to which, on which ports. Small probes inside each network test those
 flows and tell you when reality drifts from the policy.
 
-> Status: early draft (v0.1 in progress). The single-host `run` mode and the
-> responder work today; the controller, history and alerts are on the way.
+> Status: early draft (v0.1 in progress). Single-host mode, probes, the
+> controller and its history work today; alerts and reports are on the way.
 > [Leer en español](README.es.md).
 
 ## Why
@@ -94,6 +94,37 @@ PASS    guests-isolated-from-servers  servers (10.0.10.5)   22/tcp   deny    blo
 FAIL    guests-isolated-from-servers  servers (10.0.10.5)   445/tcp  deny    open
 ```
 
+### Controller and probes
+
+Run the controller once, somewhere every probe can reach (one TCP port):
+
+```sh
+# on the controller host
+segwatch token add -p policy.yaml --data /var/lib/segwatch probe-guests > guests.token
+segwatch token add -p policy.yaml --data /var/lib/segwatch probe-servers > servers.token
+segwatch controller -p policy.yaml --data /var/lib/segwatch --listen :8443
+# prints: controller fingerprint: sha256:...
+```
+
+Copy each token to its probe (`chmod 600`) and start the probe. It only
+needs the controller address, the fingerprint and its token: the controller
+tells it what to test and which ports to answer on.
+
+```sh
+segwatch probe --controller https://10.0.99.10:8443 \
+  --fingerprint sha256:... --token-file /etc/segwatch/token --source 10.0.30.5
+```
+
+```sh
+segwatch status --data /var/lib/segwatch   # exit 1 if any check fails or is stale
+```
+
+* Probes always call the controller; the controller never connects to them.
+* TLS 1.3 with the controller certificate pinned by fingerprint: no CA, no DNS.
+* Tokens are stored hashed. A probe only gets the checks for its own network,
+  and results it sends for anything else are discarded.
+* History lives in SQLite; state changes (pass to fail and back) are logged.
+
 Permissions: no root needed. Ports below 1024 need `CAP_NET_BIND_SERVICE`
 for the responder; ICMP uses unprivileged ping sockets
 (`net.ipv4.ping_group_range`) or falls back to `CAP_NET_RAW`.
@@ -110,8 +141,8 @@ go test ./...
 - [x] Policy file with validation
 - [x] TCP, UDP and ICMP checks with outcome classification
 - [x] Responder and single-host `run` mode
-- [ ] Controller: probes register with a token over pinned TLS and pull their checks
-- [ ] Scheduler, SQLite history and state-change detection
+- [x] Controller: probes authenticate with a token over pinned TLS and pull their checks
+- [x] Scheduling on the probe, SQLite history and state-change detection
 - [ ] Alerts: webhook, ntfy, Healthchecks
 - [ ] HTML report with the expected-vs-observed matrix
 - [ ] Checkmk local check and Prometheus metrics

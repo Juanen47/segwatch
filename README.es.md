@@ -4,8 +4,8 @@
 con cuál y por qué puertos. Unas sondas pequeñas dentro de cada red prueban
 esos flujos y te avisan cuando la realidad se aparta de la política.
 
-> Estado: borrador (v0.1 en desarrollo). Ya funcionan el modo `run` en un
-> solo equipo y el respondedor; el controlador, el historial y los avisos
+> Estado: borrador (v0.1 en desarrollo). Ya funcionan el modo de un solo
+> equipo, las sondas, el controlador y su historial; los avisos y el informe
 > vienen después. [Read in English](README.md).
 
 ## Por qué
@@ -47,6 +47,19 @@ segwatch validate -p policy.yaml                     # revisa la política
 segwatch respond  -p policy.yaml --network servers   # en la sonda de "servers"
 segwatch run      -p policy.yaml --from guests       # en la sonda de "guests"
 ```
+
+Con controlador y sondas:
+
+```sh
+segwatch token add -p policy.yaml --data /var/lib/segwatch sonda-invitados > invitados.token
+segwatch controller -p policy.yaml --data /var/lib/segwatch --listen :8443   # muestra la huella sha256
+segwatch probe --controller https://10.0.99.10:8443 --fingerprint sha256:... --token-file /etc/segwatch/token
+segwatch status --data /var/lib/segwatch
+```
+
+Las sondas siempre llaman al controlador (TLS 1.3 con su certificado fijado
+por huella y un token por sonda guardado como hash), reciben solo las pruebas
+de su red y el controlador guarda el historial en SQLite.
 
 `run` devuelve 1 si algún flujo no cumple, para usarlo en scripts y CI. La
 política de ejemplo está en [examples/policy.yaml](examples/policy.yaml).
