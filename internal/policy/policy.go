@@ -50,28 +50,33 @@ type Defaults struct {
 	Timeout  Duration `yaml:"timeout"`
 }
 
-// Network is a segment that hosts one probe.
+// Network is a segment that hosts one probe. A dual-stack network sets both
+// cidr (IPv4) and cidr6 (IPv6); a single-stack one sets either.
 type Network struct {
 	CIDR  string `yaml:"cidr"`
+	CIDR6 string `yaml:"cidr6"`
 	Probe Probe  `yaml:"probe"`
 
-	prefix netip.Prefix
+	prefixes []netip.Prefix
 }
 
 // Probe identifies the segwatch probe placed inside a network.
 type Probe struct {
-	Name    string `yaml:"name"`
-	Address string `yaml:"address"`
+	Name     string `yaml:"name"`
+	Address  string `yaml:"address"`
+	Address6 string `yaml:"address6"`
 
-	addr netip.Addr
+	addrs []netip.Addr
 }
 
-// Target is a real host (not a probe) that flows can point at.
+// Target is a real host (not a probe) that flows can point at. Set address,
+// address6 or both: every flow to the target is tested on each of them.
 type Target struct {
-	Address string `yaml:"address"`
-	Network string `yaml:"network"`
+	Address  string `yaml:"address"`
+	Address6 string `yaml:"address6"`
+	Network  string `yaml:"network"`
 
-	addr netip.Addr
+	addrs []netip.Addr
 }
 
 // Flow is one expected behaviour between a source network and a destination.
@@ -177,11 +182,25 @@ func (p *Policy) validate() error {
 	probeNames := map[string]string{}
 	for _, name := range sortedKeys(p.Networks) {
 		n := p.Networks[name]
-		pfx, err := netip.ParsePrefix(n.CIDR)
-		if err != nil {
-			add("network %q: invalid cidr %q", name, n.CIDR)
-		} else {
-			n.prefix = pfx.Masked()
+		if n.CIDR == "" && n.CIDR6 == "" {
+			add("network %q: cidr or cidr6 is required", name)
+		}
+		for _, f := range []struct {
+			key, val string
+			v6       bool
+		}{{"cidr", n.CIDR, false}, {"cidr6", n.CIDR6, true}} {
+			if f.val == "" {
+				continue
+			}
+			pfx, err := netip.ParsePrefix(f.val)
+			switch {
+			case err != nil:
+				add("network %q: invalid %s %q", name, f.key, f.val)
+			case f.v6 && !pfx.Addr().Is6():
+				add("network %q: cidr6 %q is not IPv6", name, f.val)
+			default:
+				n.prefixes = append(n.prefixes, pfx.Masked())
+			}
 		}
 		if n.Probe.Name == "" {
 			add("network %q: probe.name is required", name)
@@ -190,17 +209,7 @@ func (p *Policy) validate() error {
 		} else {
 			probeNames[n.Probe.Name] = name
 		}
-		if n.Probe.Address != "" {
-			a, err := netip.ParseAddr(n.Probe.Address)
-			switch {
-			case err != nil:
-				add("network %q: invalid probe.address %q", name, n.Probe.Address)
-			case n.prefix.IsValid() && !n.prefix.Contains(a):
-				add("network %q: probe.address %s is outside %s", name, a, n.prefix)
-			default:
-				n.Probe.addr = a
-			}
-		}
+		n.Probe.addrs = p.hostAddrs(add, fmt.Sprintf("network %q: probe.", name), n.Probe.Address, n.Probe.Address6, n.prefixes)
 		p.Networks[name] = n
 	}
 
@@ -209,19 +218,14 @@ func (p *Policy) validate() error {
 		if _, clash := p.Networks[name]; clash {
 			add("target %q: name is also used by a network", name)
 		}
-		a, err := netip.ParseAddr(t.Address)
-		if err != nil {
-			add("target %q: invalid address %q", name, t.Address)
-		} else {
-			t.addr = a
-		}
 		n, ok := p.Networks[t.Network]
-		switch {
-		case !ok:
+		if !ok {
 			add("target %q: unknown network %q", name, t.Network)
-		case t.addr.IsValid() && n.prefix.IsValid() && !n.prefix.Contains(t.addr):
-			add("target %q: address %s is outside network %q (%s)", name, t.addr, t.Network, n.prefix)
 		}
+		if t.Address == "" && t.Address6 == "" {
+			add("target %q: address or address6 is required", name)
+		}
+		t.addrs = p.hostAddrs(add, fmt.Sprintf("target %q: ", name), t.Address, t.Address6, n.prefixes)
 		p.Targets[name] = t
 	}
 
@@ -246,8 +250,8 @@ func (p *Policy) validate() error {
 		switch {
 		case !isNet && !isTarget:
 			add("%s: to %q is neither a network nor a target", label, f.To)
-		case isNet && !toNet.Probe.addr.IsValid():
-			add("%s: network %q needs probe.address to be used as a destination", label, f.To)
+		case isNet && len(toNet.Probe.addrs) == 0:
+			add("%s: network %q needs probe.address or probe.address6 to be used as a destination", label, f.To)
 		}
 		if f.From != "" && f.From == f.To {
 			add("%s: from and to are the same network", label)
@@ -285,6 +289,49 @@ func (p *Policy) validate() error {
 	return nil
 }
 
+// hostAddrs validates an IPv4/IPv6 address pair. Each must parse, be of the
+// right family and fall inside one of the network's prefixes (when known).
+func (p *Policy) hostAddrs(add func(string, ...any), label, v4, v6 string, prefixes []netip.Prefix) []netip.Addr {
+	var out []netip.Addr
+	for _, f := range []struct {
+		key, val string
+		v6       bool
+	}{{"address", v4, false}, {"address6", v6, true}} {
+		if f.val == "" {
+			continue
+		}
+		a, err := netip.ParseAddr(f.val)
+		switch {
+		case err != nil:
+			add("%sinvalid %s %q", label, f.key, f.val)
+			continue
+		case f.v6 && !a.Is6():
+			add("%s%s %s is not IPv6", label, f.key, a)
+			continue
+		case !f.v6 && v6 != "" && a.Is6():
+			add("%saddress %s is IPv6; put it in address6", label, a)
+			continue
+		}
+		a = a.Unmap()
+		inside := len(prefixes) == 0
+		for _, pfx := range prefixes {
+			if pfx.Contains(a) {
+				inside = true
+			}
+		}
+		if !inside {
+			names := make([]string, len(prefixes))
+			for i, pfx := range prefixes {
+				names[i] = pfx.String()
+			}
+			add("%s%s %s is outside %s", label, f.key, a, strings.Join(names, " and "))
+			continue
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
 // ParsePort parses "22/tcp", "53/udp" or "icmp".
 func ParsePort(s string) (Port, error) {
 	s = strings.ToLower(strings.TrimSpace(s))
@@ -319,8 +366,21 @@ type Check struct {
 }
 
 // ID is a stable identifier for a check, used for history and alerts.
+// IPv6 checks end in "@ipv6", so a dual-stack flow has one check per family.
 func (c Check) ID() string {
-	return fmt.Sprintf("%s:%s->%s:%s", c.Flow, c.From, c.To, c.Port)
+	id := fmt.Sprintf("%s:%s->%s:%s", c.Flow, c.From, c.To, c.Port)
+	if c.Address.Is6() {
+		id += "@ipv6"
+	}
+	return id
+}
+
+// Family is "ipv4" or "ipv6".
+func (c Check) Family() string {
+	if c.Address.Is6() {
+		return "ipv6"
+	}
+	return "ipv4"
 }
 
 // ChecksFrom expands every flow whose source is network into checks.
@@ -333,17 +393,19 @@ func (p *Policy) ChecksFrom(network string) ([]Check, error) {
 		if f.From != network {
 			continue
 		}
-		addr, responder := p.destination(f.To)
+		addrs, responder := p.destination(f.To)
 		timeout := p.Defaults.Timeout.Std()
 		if f.Timeout > 0 {
 			timeout = f.Timeout.Std()
 		}
-		for _, s := range f.Ports {
-			port, _ := ParsePort(s) // already validated
-			out = append(out, Check{
-				Flow: f.Name, From: f.From, To: f.To, Address: addr, Port: port,
-				Expect: f.Expect, Timeout: timeout, Responder: responder,
-			})
+		for _, addr := range addrs {
+			for _, s := range f.Ports {
+				port, _ := ParsePort(s) // already validated
+				out = append(out, Check{
+					Flow: f.Name, From: f.From, To: f.To, Address: addr, Port: port,
+					Expect: f.Expect, Timeout: timeout, Responder: responder,
+				})
+			}
 		}
 	}
 	return out, nil
@@ -380,11 +442,11 @@ func (p *Policy) ListenPorts(network string) ([]Port, error) {
 	return ports, nil
 }
 
-func (p *Policy) destination(to string) (netip.Addr, bool) {
+func (p *Policy) destination(to string) ([]netip.Addr, bool) {
 	if n, ok := p.Networks[to]; ok {
-		return n.Probe.addr, true
+		return n.Probe.addrs, true
 	}
-	return p.Targets[to].addr, false
+	return p.Targets[to].addrs, false
 }
 
 // NetworkOfProbe returns the network a probe name belongs to.

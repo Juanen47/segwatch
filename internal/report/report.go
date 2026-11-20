@@ -131,7 +131,7 @@ func Build(ctx context.Context, pol *policy.Policy, st *store.Store, opt Options
 		for _, c := range checks {
 			row := Row{
 				ID: c.ID(), Flow: c.Flow, From: c.From, To: c.To, Address: c.Address.String(),
-				Port: c.Port.String(), Expect: string(c.Expect), Status: Pending,
+				Port: portLabel(c), Expect: string(c.Expect), Status: Pending,
 			}
 			if i, ok := state[row.ID]; ok {
 				s := status.Checks[i]
@@ -193,6 +193,14 @@ func Build(ctx context.Context, pol *policy.Policy, st *store.Store, opt Options
 			Port: row.Port, Pass: t.Pass, Observed: t.Outcome, Detail: t.Detail})
 	}
 	return r, nil
+}
+
+// portLabel is the port, marked when the check runs over IPv6.
+func portLabel(c policy.Check) string {
+	if c.Family() == "ipv6" {
+		return c.Port.String() + " v6"
+	}
+	return c.Port.String()
 }
 
 func rank(status string) int {

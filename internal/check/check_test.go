@@ -86,3 +86,40 @@ func TestAgainstResponder(t *testing.T) {
 		t.Errorf("deny to a real host that resets: %+v", r)
 	}
 }
+
+func TestIPv6AgainstResponder(t *testing.T) {
+	ln, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback:", err)
+	}
+	tcpPort := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+	pc, err := net.ListenPacket("udp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback:", err)
+	}
+	udpPort := pc.LocalAddr().(*net.UDPAddr).Port
+	pc.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ports := []policy.Port{{Number: tcpPort, Proto: policy.TCP}, {Number: udpPort, Proto: policy.UDP}}
+	// Empty bind: the responder must answer on IPv6 as well as IPv4.
+	go func() { _ = responder.Serve(ctx, "", ports, log) }()
+	time.Sleep(100 * time.Millisecond)
+
+	lo6 := netip.MustParseAddr("::1")
+	for _, p := range ports {
+		c := policy.Check{Flow: "t", Address: lo6, Port: p, Expect: policy.Allow, Timeout: 500 * time.Millisecond, Responder: true}
+		if r := check.RunFrom(ctx, c, lo6); !r.Pass || r.Outcome != check.Open || r.Detail != "" {
+			t.Errorf("%s over IPv6: %+v", p, r)
+		}
+	}
+	icmp := policy.Check{Flow: "t", Address: lo6, Port: policy.Port{Proto: policy.ICMP}, Expect: policy.Allow, Timeout: time.Second}
+	if r := check.Run(ctx, icmp); r.Outcome == check.Error {
+		t.Logf("ping6 not available here: %s", r.Detail)
+	} else if !r.Pass {
+		t.Errorf("ping6 ::1: %+v", r)
+	}
+}

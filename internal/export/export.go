@@ -12,18 +12,23 @@ import (
 	"github.com/Juanen47/segwatch/internal/api"
 )
 
-// Labels splits a check ID ("flow:from->to:port") into its parts.
-func Labels(id string) (flow, from, to, port string) {
+// Labels splits a check ID ("flow:from->to:port", with "@ipv6" at the end
+// for IPv6 checks) into its parts.
+func Labels(id string) (flow, from, to, port, family string) {
+	family = "ipv4"
+	if base, ok := strings.CutSuffix(id, "@ipv6"); ok {
+		id, family = base, "ipv6"
+	}
 	rest, port, ok := cut(id, ":", true)
 	if !ok {
-		return id, "", "", ""
+		return id, "", "", "", family
 	}
 	path, to, ok := cut(rest, "->", true)
 	if !ok {
-		return rest, "", "", port
+		return rest, "", "", port, family
 	}
 	flow, from, _ = cut(path, ":", true)
-	return flow, from, to, port
+	return flow, from, to, port, family
 }
 
 func cut(s, sep string, last bool) (before, after string, ok bool) {
@@ -75,9 +80,9 @@ func Prometheus(w io.Writer, st api.Status, staleAfter time.Duration) error {
 	for _, s := range per {
 		gauge(s.name, s.help)
 		for _, c := range checks {
-			flow, from, to, port := Labels(c.CheckID)
-			fmt.Fprintf(&b, "%s{flow=%q,from=%q,to=%q,port=%q,expect=%q,observed=%q,probe=%q} %g\n",
-				s.name, esc(flow), esc(from), esc(to), esc(port), esc(c.Expect), esc(c.Outcome), esc(c.Probe), s.val(c))
+			flow, from, to, port, family := Labels(c.CheckID)
+			fmt.Fprintf(&b, "%s{flow=%q,from=%q,to=%q,port=%q,family=%q,expect=%q,observed=%q,probe=%q} %g\n",
+				s.name, esc(flow), esc(from), esc(to), esc(port), family, esc(c.Expect), esc(c.Outcome), esc(c.Probe), s.val(c))
 		}
 	}
 	_, err := io.WriteString(w, b.String())
@@ -119,7 +124,10 @@ func Checkmk(w io.Writer, st api.Status, staleAfter time.Duration) error {
 	}
 	flows := map[string]*flowState{}
 	for _, c := range st.Checks {
-		flow, from, to, port := Labels(c.CheckID)
+		flow, from, to, port, family := Labels(c.CheckID)
+		if family == "ipv6" {
+			port += " (IPv6)"
+		}
 		f := flows[flow]
 		if f == nil {
 			f = &flowState{}

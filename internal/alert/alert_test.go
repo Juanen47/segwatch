@@ -204,3 +204,33 @@ func TestSummaryMixed(t *testing.T) {
 		t.Errorf("title %q failing %v", title, failing)
 	}
 }
+
+func TestQuietAtStartup(t *testing.T) {
+	rec := &recorder{}
+	srv := httptest.NewServer(rec)
+	defer srv.Close()
+	d := newDispatcher(t, policy.Alert{Type: "webhook", URL: srv.URL})
+	start := time.Now()
+	d.Quiet(start.Add(time.Hour))
+
+	// A failure and its recovery inside the quiet period: nothing is sent.
+	d.Notify(FromChanges([]store.Change{change(false, nil)}))
+	d.Notify(FromChanges([]store.Change{change(true, &api.CheckState{Outcome: "open"})}))
+	d.Wait()
+	if n := len(rec.all()); n != 0 {
+		t.Fatalf("%d alerts sent during the quiet period", n)
+	}
+
+	// First heartbeat after it: what still fails is reported, once.
+	st := api.Status{Generated: start.Add(time.Hour), Checks: []api.CheckState{
+		{CheckID: "a", Flow: "f", Port: "22/tcp", Outcome: "open", Pass: false, Seen: start.Add(time.Hour)},
+		{CheckID: "b", Pass: true, Seen: start.Add(time.Hour)},
+	}}
+	d.Heartbeat(st)
+	d.Heartbeat(st)
+	d.Wait()
+	hits := rec.all()
+	if len(hits) != 1 || !strings.Contains(hits[0].Body, `"check_id":"a"`) || strings.Contains(hits[0].Body, `"check_id":"b"`) {
+		t.Fatalf("want one alert for the still-failing check, got %+v", hits)
+	}
+}

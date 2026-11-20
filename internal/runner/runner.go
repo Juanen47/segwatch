@@ -14,9 +14,9 @@ import (
 
 // Options limit how hard a run hits the network.
 type Options struct {
-	Concurrency int        // parallel checks, default 8
-	PerSecond   int        // checks started per second, default 20
-	Source      netip.Addr // optional fixed source address
+	Concurrency int          // parallel checks, default 8
+	PerSecond   int          // checks started per second, default 20
+	Sources     []netip.Addr // optional fixed source addresses, at most one per family
 }
 
 // Run executes every check and returns the results sorted by flow and port.
@@ -44,7 +44,7 @@ func Run(ctx context.Context, checks []policy.Check, opt Options) []check.Result
 		wg.Add(1)
 		go func(i int, c policy.Check) {
 			defer func() { <-sem; wg.Done() }()
-			results[i] = check.RunFrom(ctx, c, opt.Source)
+			results[i] = check.RunFrom(ctx, c, SourceFor(opt.Sources, c.Address))
 		}(i, c)
 	}
 	wg.Wait()
@@ -68,4 +68,15 @@ func Failed(rs []check.Result) int {
 		}
 	}
 	return n
+}
+
+// SourceFor picks the source address of the same family as dst, or the zero
+// address (let the kernel choose) when none matches.
+func SourceFor(sources []netip.Addr, dst netip.Addr) netip.Addr {
+	for _, s := range sources {
+		if s.Is4() == dst.Unmap().Is4() {
+			return s
+		}
+	}
+	return netip.Addr{}
 }

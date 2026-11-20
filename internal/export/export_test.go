@@ -21,9 +21,13 @@ func status() api.Status {
 }
 
 func TestLabels(t *testing.T) {
-	f, a, b, p := Labels("guests-isolated:guests->servers:22/tcp")
-	if f != "guests-isolated" || a != "guests" || b != "servers" || p != "22/tcp" {
-		t.Errorf("got %q %q %q %q", f, a, b, p)
+	f, a, b, p, fam := Labels("guests-isolated:guests->servers:22/tcp")
+	if f != "guests-isolated" || a != "guests" || b != "servers" || p != "22/tcp" || fam != "ipv4" {
+		t.Errorf("got %q %q %q %q %q", f, a, b, p, fam)
+	}
+	f, a, b, p, fam = Labels("g:guests->servers:icmp@ipv6")
+	if f != "g" || a != "guests" || b != "servers" || p != "icmp" || fam != "ipv6" {
+		t.Errorf("ipv6: got %q %q %q %q %q", f, a, b, p, fam)
 	}
 }
 
@@ -35,8 +39,8 @@ func TestPrometheus(t *testing.T) {
 	out := b.String()
 	for _, want := range []string{
 		"segwatch_checks_failing 1\n",
-		`segwatch_check_pass{flow="guests-isolated",from="guests",to="servers",port="22/tcp",expect="deny",observed="open",probe="p-guests"} 0`,
-		`segwatch_check_stale{flow="mgmt-ssh",from="mgmt",to="servers",port="22/tcp",expect="allow",observed="open",probe="p-mgmt"} 1`,
+		`segwatch_check_pass{flow="guests-isolated",from="guests",to="servers",port="22/tcp",family="ipv4",expect="deny",observed="open",probe="p-guests"} 0`,
+		`segwatch_check_stale{flow="mgmt-ssh",from="mgmt",to="servers",port="22/tcp",family="ipv4",expect="allow",observed="open",probe="p-mgmt"} 1`,
 		"# TYPE segwatch_check_last_seen_timestamp_seconds gauge",
 	} {
 		if !strings.Contains(out, want) {

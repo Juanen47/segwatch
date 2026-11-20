@@ -226,6 +226,43 @@ cd examples/lab
 ./lab.sh down
 ```
 
+`IPV6=1 ./lab.sh up` (and the same prefix on every command) runs the lab
+dual-stack, with 24 checks: each one over IPv4 and IPv6. It needs IPv6 in
+the Docker host, which Docker Desktop and WSL2 have.
+
+## IPv6 and dual-stack networks
+
+On a dual-stack network, IPv6 often gets less firewall attention than IPv4:
+the VLAN is isolated over IPv4 while IPv6 routes straight through. segwatch
+tests both. Give a network `cidr6` and its probe `address6` (and a target
+`address6`), and every flow to it runs once per family:
+
+```yaml
+networks:
+  guests:  { cidr: 10.0.30.0/24, cidr6: "fd00:30::/64",
+             probe: { name: probe-guests, address: 10.0.30.5, address6: "fd00:30::5" } }
+targets:
+  nas: { address: 10.0.10.20, address6: "fd00:10::20", network: servers }
+```
+
+IPv6 checks have IDs ending in `@ipv6`. They show up as `22/tcp v6` in the
+report, with `family="ipv6"` in Prometheus and with "(IPv6)" in Checkmk. A
+network can also be IPv6-only (`cidr6` and `address6` alone). For a probe
+with several interfaces, fix the source address per family:
+`--source 10.0.30.5,fd00:30::5`.
+
+## Install
+
+Download a release for your platform from
+[Releases](https://github.com/Juanen47/segwatch/releases): Linux amd64, arm64
+and armv7 (Raspberry Pi), and FreeBSD amd64 (OPNsense, pfSense). Each one is
+a single static binary. Check the download before you run it:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing
+gh attestation verify segwatch_*_linux_amd64.tar.gz --repo Juanen47/segwatch   # built by this repo's CI
+```
+
 ## Build
 
 ```sh
@@ -243,7 +280,8 @@ go test ./...
 - [x] Alerts: webhook, ntfy, Healthchecks
 - [x] HTML report with the expected-vs-observed matrix
 - [x] Checkmk local check and Prometheus metrics
-- [ ] IPv6 flows, release binaries
+- [x] IPv6 and dual-stack flows
+- [x] Release binaries with checksums and build provenance
 
 ## Responsible use
 
