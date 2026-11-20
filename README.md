@@ -152,7 +152,7 @@ go test ./...
 
 Only test networks you own or are authorised in writing to test. segwatch
 only contacts what the policy lists, with a rate limit. See
-[SECURITY.md](SECURITY.md).
+[SECURITY.md](SECURITY.md) ([en español](SECURITY.es.md)).
 
 ## License
 
