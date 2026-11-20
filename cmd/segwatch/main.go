@@ -32,7 +32,7 @@ Single host:
   segwatch respond  -p policy.yaml --network <network> [--bind addr]
 
 Controller and probes:
-  segwatch controller  -p policy.yaml --data <dir> [--listen :8443]
+  segwatch controller  -p policy.yaml --data <dir> [--listen :8443] [--metrics 127.0.0.1:9469]
   segwatch token add   -p policy.yaml --data <dir> <probe-name>
   segwatch token list  --data <dir>
   segwatch token revoke --data <dir> <probe-name>
@@ -40,6 +40,8 @@ Controller and probes:
   segwatch status      --data <dir> [--json]
   segwatch report      -p policy.yaml --data <dir> [-o report.html] [--days 30]
   segwatch alert test  -p policy.yaml
+  segwatch metrics     --data <dir>     (Prometheus text format; or controller --metrics addr)
+  segwatch checkmk     --data <dir>     (Checkmk local check)
   segwatch probe --controller https://host:8443 --fingerprint sha256:... --token-file <file>
                  [--bind addr] [--source addr]
 
@@ -80,6 +82,8 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(args[1:], stdout, stderr)
 	case "probe":
 		return cmdProbe(ctx, args[1:], stderr)
+	case "metrics", "checkmk":
+		return cmdExport(args[0], args[1:], stdout, stderr)
 	case "report":
 		return cmdReport(ctx, args[1:], stdout, stderr)
 	case "alert":

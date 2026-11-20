@@ -14,7 +14,7 @@ services:
     image: segwatch-lab
     build: { context: ., dockerfile_inline: "FROM scratch\nCOPY segwatch /segwatch\nENTRYPOINT [\"/segwatch\"]\n" }
     user: "65534:65534"
-    command: [controller, -p, /lab/policy.yaml, --data, /lab/data, --listen, ":8443"]
+    command: [controller, -p, /lab/policy.yaml, --data, /lab/data, --listen, ":8443", --metrics, ":9469"]
     volumes: [".:/lab"]
     networks:
       mgmt:    { ipv4_address: 172.31.10.10 }

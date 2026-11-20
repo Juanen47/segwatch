@@ -21,6 +21,7 @@ import (
 	"github.com/Juanen47/segwatch/internal/alert"
 	"github.com/Juanen47/segwatch/internal/api"
 	"github.com/Juanen47/segwatch/internal/controller"
+	"github.com/Juanen47/segwatch/internal/export"
 	"github.com/Juanen47/segwatch/internal/pki"
 	"github.com/Juanen47/segwatch/internal/report"
 	"github.com/Juanen47/segwatch/internal/store"
@@ -56,6 +57,7 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 	keep := fs.Duration("keep", 90*24*time.Hour, "how long to keep raw results")
 	debug := fs.Bool("debug", false, "verbose logging")
 	stale := fs.Duration("stale", 0, "alert when a check has no result for this long (default: 3 policy intervals)")
+	metrics := fs.String("metrics", "", "serve Prometheus metrics over plain HTTP on this address, e.g. 127.0.0.1:9469 (default: off)")
 	pol, ok := loadPolicy(fs, args, stderr)
 	if !ok {
 		return 2
@@ -120,6 +122,19 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 		}
 	}()
 
+	if *metrics != "" {
+		ms := &http.Server{Addr: *metrics, Handler: metricsHandler(st, *stale, log), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			<-ctx.Done()
+			_ = ms.Close()
+		}()
+		go func() {
+			if err := ms.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("metrics listener", "err", err)
+			}
+		}()
+		log.Info("metrics listening", "addr", *metrics, "path", "/metrics")
+	}
 	if len(pol.Alerts) > 0 {
 		go heartbeat(ctx, st, alerts, interval, *stale, log)
 	}
@@ -432,5 +447,60 @@ func cmdReport(ctx context.Context, args []string, stdout, stderr io.Writer) int
 	if rep.Failing > 0 || rep.Stale > 0 {
 		return 1
 	}
+	return 0
+}
+
+func metricsHandler(st *store.Store, stale time.Duration, log *slog.Logger) http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		status, err := st.Status(r.Context(), time.Now().UTC(), stale)
+		if err != nil {
+			log.Error("status for metrics", "err", err)
+			http.Error(w, "store error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		_ = export.Prometheus(w, status, stale)
+	})
+	return mux
+}
+
+// cmdExport prints the status for a monitoring system: "metrics" for the
+// Prometheus node_exporter textfile collector, "checkmk" for a local check.
+func cmdExport(kind string, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(kind, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	data := fs.String("data", "", "controller data directory (required)")
+	stale := fs.Duration("stale", 3*time.Hour, "mark checks not seen for this long as stale")
+	if err := fs.Parse(args); err != nil || *data == "" {
+		fmt.Fprintf(stderr, "usage: segwatch %s --data <dir> [--stale 3h]\n", kind)
+		return 2
+	}
+	path := filepath.Join(*data, dbFile)
+	if _, err := os.Stat(path); err != nil {
+		fmt.Fprintf(stderr, "no history yet at %s\n", path)
+		return 2
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	defer st.Close()
+	status, err := st.Status(context.Background(), time.Now().UTC(), *stale)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if kind == "checkmk" {
+		err = export.Checkmk(stdout, status, *stale)
+	} else {
+		err = export.Prometheus(stdout, status, *stale)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	// Monitoring reads the state from the output, so the exit code stays 0.
 	return 0
 }

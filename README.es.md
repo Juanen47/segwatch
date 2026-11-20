@@ -5,8 +5,8 @@ con cuál y por qué puertos. Unas sondas pequeñas dentro de cada red prueban
 esos flujos y te avisan cuando la realidad se aparta de la política.
 
 > Estado: borrador (v0.1 en desarrollo). Ya funcionan el modo de un solo
-> equipo, las sondas, el controlador, su historial, los avisos y el informe
-> HTML. [Read in English](README.md).
+> equipo, las sondas, el controlador, su historial, los avisos, el informe
+> HTML y la exportación a Prometheus y Checkmk. [Read in English](README.md).
 
 ## Por qué
 
@@ -153,6 +153,37 @@ Sale con 1 si alguna prueba falla o está desfasada, así un cron puede
 mandarlo solo cuando algo va mal. Lee el historial y no necesita que el
 controlador esté en marcha.
 
+### Monitorización: Prometheus y Checkmk
+
+**Prometheus.** Arranca el controlador con `--metrics 127.0.0.1:9469` y
+recoge `/metrics` (HTTP sin cifrar, así que déjalo en localhost o en la red
+de gestión). Sin servidor de métricas, `segwatch metrics --data <dir>`
+imprime lo mismo para el textfile collector de node_exporter:
+
+```sh
+segwatch metrics --data /var/lib/segwatch > /var/lib/node_exporter/segwatch.prom.tmp \
+  && mv /var/lib/node_exporter/segwatch.prom.tmp /var/lib/node_exporter/segwatch.prom
+```
+
+Totales: `segwatch_checks`, `segwatch_checks_failing` y
+`segwatch_checks_stale`. Por prueba, con etiquetas flow, from, to, port,
+expect, observed y probe: `segwatch_check_pass`, `segwatch_check_stale`,
+`segwatch_check_last_seen_timestamp_seconds` y
+`segwatch_check_since_timestamp_seconds`. Una regla de alerta para empezar:
+`segwatch_checks_failing > 0 or segwatch_checks_stale > 0`.
+
+**Checkmk.** En el equipo del controlador, añade un check local que
+muestra un servicio por flujo más `segwatch summary` (CRIT si una prueba
+falla, WARN si está desfasada, con métricas para las gráficas):
+
+```sh
+cat > /usr/lib/check_mk_agent/local/segwatch <<'SH'
+#!/bin/sh
+exec /usr/local/bin/segwatch checkmk --data /var/lib/segwatch
+SH
+chmod +x /usr/lib/check_mk_agent/local/segwatch
+```
+
 ### Avisos
 
 El controlador envía avisos a los canales que pongas en `alerts:` dentro de
@@ -198,6 +229,8 @@ cd examples/lab
 ./lab.sh heal     # lo deshace; vuelve a 0 fallos
 ./lab.sh alerts   # lo que han recibido ntfy, el webhook y Healthchecks
 ./lab.sh report   # genera examples/lab/report.html
+./lab.sh metrics  # métricas de Prometheus del controlador
+./lab.sh checkmk  # salida del check local de Checkmk
 ./lab.sh down
 ```
 
@@ -217,7 +250,7 @@ go test ./...
 - [x] Planificación en la sonda, historial en SQLite y detección de cambios de estado
 - [x] Avisos: webhook, ntfy, Healthchecks
 - [x] Informe HTML con la matriz esperado frente a observado
-- [ ] Check local de Checkmk y métricas de Prometheus
+- [x] Check local de Checkmk y métricas de Prometheus
 - [ ] Flujos IPv6 y binarios publicados
 
 ## Uso responsable
