@@ -136,6 +136,22 @@ Permisos: no necesita root. El respondedor necesita `CAP_NET_BIND_SERVICE`
 para puertos por debajo de 1024, y el ping usa sockets ICMP sin privilegios
 (`net.ipv4.ping_group_range`) o, si no, `CAP_NET_RAW`.
 
+## Pruébalo con Docker
+
+[examples/lab](examples/lab) monta tres redes Docker aisladas (gestión,
+servidores, invitados), un controlador, tres sondas y un servidor web real.
+Necesita Go y Docker, sin root.
+
+```sh
+cd examples/lab
+./lab.sh up       # compila, crea los tokens y arranca todo
+./lab.sh status   # 12 pruebas, 0 fallan
+./lab.sh drift    # simula un error en el cortafuegos: invitados llega a servidores
+./lab.sh status   # las 5 pruebas de invitados a servidores FALLAN
+./lab.sh heal     # lo deshace; vuelve a 0 fallos
+./lab.sh down
+```
+
 ## Compilar
 
 ```sh
