@@ -1,0 +1,4 @@
+/segwatch
+/dist/
+*.db
+policy.local.yaml

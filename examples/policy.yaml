@@ -1,0 +1,46 @@
+# Example policy. Addresses are from private test ranges: replace them with yours.
+version: 1
+
+defaults:
+  interval: 1h   # how often the controller runs every check (v0.2+)
+  timeout: 2s    # per-check timeout
+
+networks:
+  guests:
+    cidr: 10.0.30.0/24
+    probe: { name: probe-guests, address: 10.0.30.5 }
+  servers:
+    cidr: 10.0.10.0/24
+    probe: { name: probe-servers, address: 10.0.10.5 }
+  management:
+    cidr: 10.0.99.0/24
+    probe: { name: probe-mgmt, address: 10.0.99.5 }
+
+targets:
+  nas: { address: 10.0.10.20, network: servers }
+
+flows:
+  # Destination is a network: its probe answers on every listed port,
+  # so "deny" passes only if traffic does not get through.
+  - name: guests-isolated-from-servers
+    from: guests
+    to: servers
+    ports: [22/tcp, 445/tcp, 53/udp, icmp]
+    expect: deny
+
+  - name: guests-isolated-from-management
+    from: guests
+    to: management
+    ports: [22/tcp, 443/tcp, icmp]
+    expect: deny
+
+  # Destination is a real host.
+  - name: management-reaches-nas
+    from: management
+    to: nas
+    ports: [443/tcp]
+    expect: allow
+
+alerts:
+  - type: ntfy
+    url: https://ntfy.sh/replace-with-a-secret-topic
