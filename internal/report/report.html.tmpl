@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+<meta name="referrer" content="no-referrer">
+<title>segwatch report {{date .Generated}}</title>
+<style>
+:root{--bg:#fff;--fg:#1d2025;--muted:#5d6470;--line:#dde1e6;--soft:#f4f6f8;
+--pass:#1a7f37;--pass-bg:#e7f5ea;--fail:#c62828;--fail-bg:#fdecec;--stale:#9a6700;--stale-bg:#fff6dd;--pend:#5d6470;--pend-bg:#eef0f3}
+@media (prefers-color-scheme:dark){:root{--bg:#14171b;--fg:#e6e8eb;--muted:#9aa3ae;--line:#2c323a;--soft:#1b1f24;
+--pass:#56d364;--pass-bg:#12261a;--fail:#ff7b72;--fail-bg:#2d1517;--stale:#e3b341;--stale-bg:#2b2311;--pend:#9aa3ae;--pend-bg:#22272e}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:32px 16px 48px}
+h1{font-size:26px;margin:0 0 4px}h2{font-size:18px;margin:36px 0 12px}
+.sub{color:var(--muted);margin:0}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:13px}
+td.mono{white-space:nowrap}
+.verdict{margin:24px 0;padding:16px 20px;border-radius:10px;font-weight:600;font-size:17px}
+.verdict.ok{background:var(--pass-bg);color:var(--pass)}.verdict.bad{background:var(--fail-bg);color:var(--fail)}
+.verdict.warn{background:var(--stale-bg);color:var(--stale)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px}
+.tile{border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.tile b{display:block;font-size:26px;line-height:1.2}.tile span{color:var(--muted);font-size:13px}
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+th{background:var(--soft);font-size:13px;font-weight:600;color:var(--muted);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+.matrix th[scope=row]{color:var(--fg)}
+.matrix td{min-width:150px}
+.none{color:var(--muted);font-size:13px}
+.b{display:inline-block;margin:2px 4px 2px 0;padding:1px 7px;border-radius:999px;font-size:12px;white-space:nowrap;
+font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
+.pass{background:var(--pass-bg);color:var(--pass)}.fail{background:var(--fail-bg);color:var(--fail);font-weight:700}
+.stale{background:var(--stale-bg);color:var(--stale)}.pending{background:var(--pend-bg);color:var(--pend)}
+.legend{color:var(--muted);font-size:13px;margin-top:8px}
+footer{margin-top:40px;color:var(--muted);font-size:13px;border-top:1px solid var(--line);padding-top:12px;overflow-wrap:anywhere}
+h1,.sub,.verdict{overflow-wrap:anywhere}
+@media print{body{font-size:12px}main{max-width:none;padding:0}.scroll{overflow:visible}h2{break-after:avoid}tr{break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<h1>Network segmentation report</h1>
+<p class="sub">Generated {{ts .Generated}} · history since {{ts .Since}}</p>
+
+{{if gt .Failing 0}}<div class="verdict bad">✗ {{.Failing}} of {{.Total}} checks do not match the policy</div>
+{{else if gt .Stale 0}}<div class="verdict warn">? Every recent result matches, but {{.Stale}} checks have stopped reporting</div>
+{{else if eq .Passing .Total}}<div class="verdict ok">✓ All {{.Total}} checks match the policy</div>
+{{else}}<div class="verdict warn">… {{.Pending}} checks have no result yet</div>{{end}}
+
+<div class="tiles">
+<div class="tile"><b>{{.Total}}</b><span>checks</span></div>
+<div class="tile"><b>{{.Passing}}</b><span>match the policy</span></div>
+<div class="tile"><b>{{.Failing}}</b><span>do not match</span></div>
+<div class="tile"><b>{{.Stale}}</b><span>stale</span></div>
+<div class="tile"><b>{{.Pending}}</b><span>no result yet</span></div>
+</div>
+
+<h2>Matrix</h2>
+<div class="scroll"><table class="matrix">
+<thead><tr><th>from \ to</th>{{range .Dests}}<th scope="col">{{.}}</th>{{end}}</tr></thead>
+<tbody>{{range $i, $src := .Sources}}<tr><th scope="row">{{$src}}</th>
+{{range index $.Matrix $i}}<td>{{if .Rows}}{{range .Rows}}<span class="b {{.Status}}" title="{{.Flow}}: expect {{.Expect}}, observed {{if .Observed}}{{.Observed}}{{else}}nothing yet{{end}}">{{mark .Status}} {{.Port}} {{.Expect}}</span>{{end}}{{else}}<span class="none">not tested</span>{{end}}</td>{{end}}
+</tr>{{end}}</tbody>
+</table></div>
+<p class="legend">Each badge is one check: port and the expected result. ✓ matches the policy, ✗ does not, ? stale (no recent result), … not run yet.</p>
+
+<h2>Checks</h2>
+<div class="scroll"><table>
+<thead><tr><th>Status</th><th>Flow</th><th>From → to</th><th>Port</th><th>Expect</th><th>Observed</th><th>Since</th><th>Uptime</th><th>Detail</th></tr></thead>
+<tbody>{{range .Rows}}<tr>
+<td><span class="b {{.Status}}">{{mark .Status}} {{.Status}}</span></td>
+<td>{{.Flow}}</td><td>{{.From}} → {{.To}} <span class="mono none">{{.Address}}</span></td>
+<td class="mono">{{.Port}}</td><td>{{.Expect}}</td><td>{{if .Observed}}{{.Observed}}{{else}}–{{end}}</td>
+<td class="mono">{{ts .Since}}</td><td class="mono" title="{{.Passes}} of {{.Runs}} runs">{{.Uptime}}</td><td>{{.Detail}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+
+<h2>Recent changes</h2>
+{{if .Changes}}<div class="scroll"><table>
+<thead><tr><th>When</th><th>Change</th><th>Flow</th><th>From → to</th><th>Port</th><th>Observed</th><th>Detail</th></tr></thead>
+<tbody>{{range .Changes}}<tr>
+<td class="mono">{{tss .At}}</td>
+<td>{{if .Pass}}<span class="b pass">✓ recovered</span>{{else}}<span class="b fail">✗ broke</span>{{end}}</td>
+<td>{{.Flow}}</td><td>{{.From}} → {{.To}}</td><td class="mono">{{.Port}}</td><td>{{.Observed}}</td><td>{{.Detail}}</td>
+</tr>{{end}}</tbody>
+</table></div>
+{{else}}<p class="none">No check changed state in this period.</p>{{end}}
+
+{{if .Retired}}<h2>No longer in the policy</h2>
+<p class="none">These checks have history but are not in the current policy, so they are not counted above.</p>
+<div class="scroll"><table><thead><tr><th>Check</th><th>Last result</th><th>Last seen</th></tr></thead>
+<tbody>{{range .Retired}}<tr><td class="mono">{{.ID}}</td><td>{{.Observed}}</td><td class="mono">{{ts .Seen}}</td></tr>{{end}}</tbody></table></div>{{end}}
+
+<footer>segwatch {{.Version}} · policy sha256 <span class="mono">{{.PolicyHash}}</span></footer>
+</main>
+</body>
+</html>

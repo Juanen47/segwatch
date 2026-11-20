@@ -5,8 +5,8 @@ con cuál y por qué puertos. Unas sondas pequeñas dentro de cada red prueban
 esos flujos y te avisan cuando la realidad se aparta de la política.
 
 > Estado: borrador (v0.1 en desarrollo). Ya funcionan el modo de un solo
-> equipo, las sondas, el controlador, su historial y los avisos; el informe
-> viene después. [Read in English](README.md).
+> equipo, las sondas, el controlador, su historial, los avisos y el informe
+> HTML. [Read in English](README.md).
 
 ## Por qué
 
@@ -132,6 +132,27 @@ segwatch status --data /var/lib/segwatch   # sale con 1 si alguna prueba falla o
 * El historial se guarda en SQLite y se registran los cambios de estado (de
   cumple a falla y al revés).
 
+### Informe
+
+```sh
+segwatch report -p policy.yaml --data /var/lib/segwatch -o informe.html   # --days 30 por defecto
+```
+
+Una sola página HTML autónoma, sin scripts ni recursos externos, para
+archivarla o adjuntarla a una auditoría:
+
+* una matriz de redes de origen frente a destinos, con una etiqueta por
+  prueba (✓ cumple la política, ✗ no cumple, ? desfasada, … sin ejecutar);
+* cada prueba con el resultado esperado y el observado, desde cuándo, y el
+  porcentaje de ejecuciones que cumplieron en el periodo;
+* los cambios recientes (se rompe / se recupera);
+* el hash SHA-256 de la política, para que el informe diga exactamente qué
+  política comprobó.
+
+Sale con 1 si alguna prueba falla o está desfasada, así un cron puede
+mandarlo solo cuando algo va mal. Lee el historial y no necesita que el
+controlador esté en marcha.
+
 ### Avisos
 
 El controlador envía avisos a los canales que pongas en `alerts:` dentro de
@@ -176,6 +197,7 @@ cd examples/lab
 ./lab.sh status   # las 5 pruebas de invitados a servidores FALLAN
 ./lab.sh heal     # lo deshace; vuelve a 0 fallos
 ./lab.sh alerts   # lo que han recibido ntfy, el webhook y Healthchecks
+./lab.sh report   # genera examples/lab/report.html
 ./lab.sh down
 ```
 
@@ -194,7 +216,7 @@ go test ./...
 - [x] Controlador: las sondas se autentican con un token sobre TLS fijado y piden sus pruebas
 - [x] Planificación en la sonda, historial en SQLite y detección de cambios de estado
 - [x] Avisos: webhook, ntfy, Healthchecks
-- [ ] Informe HTML con la matriz esperado frente a observado
+- [x] Informe HTML con la matriz esperado frente a observado
 - [ ] Check local de Checkmk y métricas de Prometheus
 - [ ] Flujos IPv6 y binarios publicados
 
