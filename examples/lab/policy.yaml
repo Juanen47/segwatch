@@ -1,0 +1,39 @@
+# Lab policy: three Docker networks that stand in for VLANs.
+# Docker isolates bridge networks from each other, which plays the firewall.
+version: 1
+defaults: { interval: 10s, timeout: 1s }
+
+networks:
+  mgmt:    { cidr: 172.31.10.0/24, probe: { name: probe-mgmt,    address: 172.31.10.5 } }
+  servers: { cidr: 172.31.20.0/24, probe: { name: probe-servers, address: 172.31.20.5 } }
+  guests:  { cidr: 172.31.30.0/24, probe: { name: probe-guests,  address: 172.31.30.5 } }
+
+targets:
+  web: { address: 172.31.20.20, network: servers }
+
+flows:
+  - name: mgmt-reaches-servers
+    from: mgmt
+    to: servers
+    ports: [22/tcp, 443/tcp, 161/udp, icmp]
+    expect: allow
+  - name: mgmt-reaches-web
+    from: mgmt
+    to: web
+    ports: [80/tcp]
+    expect: allow
+  - name: guests-isolated-from-servers
+    from: guests
+    to: servers
+    ports: [22/tcp, 445/tcp, 53/udp, icmp]
+    expect: deny
+  - name: guests-isolated-from-web
+    from: guests
+    to: web
+    ports: [80/tcp]
+    expect: deny
+  - name: guests-isolated-from-mgmt
+    from: guests
+    to: mgmt
+    ports: [22/tcp, icmp]
+    expect: deny

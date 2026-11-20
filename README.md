@@ -129,6 +129,22 @@ Permissions: no root needed. Ports below 1024 need `CAP_NET_BIND_SERVICE`
 for the responder; ICMP uses unprivileged ping sockets
 (`net.ipv4.ping_group_range`) or falls back to `CAP_NET_RAW`.
 
+## Try it on Docker
+
+[examples/lab](examples/lab) builds three isolated Docker networks (management,
+servers, guests), a controller, three probes and one real web server. Needs
+Go and Docker, no root.
+
+```sh
+cd examples/lab
+./lab.sh up       # build, create tokens, start everything
+./lab.sh status   # 12 checks, 0 failing
+./lab.sh drift    # simulate a firewall mistake: guests reach the servers
+./lab.sh status   # the 5 guest-to-server checks now FAIL
+./lab.sh heal     # undo it; back to 0 failing
+./lab.sh down
+```
+
 ## Build
 
 ```sh

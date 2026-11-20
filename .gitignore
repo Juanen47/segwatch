@@ -2,3 +2,5 @@
 /dist/
 *.db
 policy.local.yaml
+examples/lab/data/
+examples/lab/segwatch

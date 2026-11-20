@@ -152,7 +152,8 @@ func udp(ctx context.Context, c policy.Check, src netip.Addr) (Outcome, string) 
 	addr := netip.AddrPortFrom(c.Address, uint16(c.Port.Number)).String()
 	conn, err := d.DialContext(ctx, "udp", addr)
 	if err != nil {
-		return Error, err.Error()
+		// No route to the destination is a block, not a local error.
+		return classify(err)
 	}
 	defer conn.Close()
 	nonce := newNonce()

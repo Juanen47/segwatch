@@ -1,0 +1,56 @@
+# segwatch lab: run ./lab.sh, not this file directly (it creates the tokens).
+name: segwatch-lab
+
+x-probe: &probe
+  image: segwatch-lab
+  build: { context: ., dockerfile_inline: "FROM scratch\nCOPY segwatch /segwatch\nENTRYPOINT [\"/segwatch\"]\n" }
+  sysctls: { net.ipv4.ping_group_range: "0 2147483647" }
+  user: "65534:65534"
+  restart: unless-stopped
+  depends_on: [controller]
+
+services:
+  controller:
+    image: segwatch-lab
+    build: { context: ., dockerfile_inline: "FROM scratch\nCOPY segwatch /segwatch\nENTRYPOINT [\"/segwatch\"]\n" }
+    user: "65534:65534"
+    command: [controller, -p, /lab/policy.yaml, --data, /lab/data, --listen, ":8443"]
+    volumes: [".:/lab"]
+    networks:
+      mgmt:    { ipv4_address: 172.31.10.10 }
+      servers: { ipv4_address: 172.31.20.10 }
+      guests:  { ipv4_address: 172.31.30.10 }
+
+  probe-mgmt:
+    <<: *probe
+    command: [probe, --controller, "https://172.31.10.10:8443", --fingerprint, "${FP}", --token-file, /lab/tokens/probe-mgmt]
+    volumes: ["./data/tokens:/lab/tokens:ro"]
+    networks:
+      mgmt:    { ipv4_address: 172.31.10.5 }
+      # stands in for the route from management to servers
+      servers: { ipv4_address: 172.31.20.6 }
+
+  probe-servers:
+    <<: *probe
+    command: [probe, --controller, "https://172.31.20.10:8443", --fingerprint, "${FP}", --token-file, /lab/tokens/probe-servers]
+    volumes: ["./data/tokens:/lab/tokens:ro"]
+    networks:
+      servers: { ipv4_address: 172.31.20.5 }
+
+  probe-guests:
+    <<: *probe
+    command: [probe, --controller, "https://172.31.30.10:8443", --fingerprint, "${FP}", --token-file, /lab/tokens/probe-guests]
+    volumes: ["./data/tokens:/lab/tokens:ro"]
+    networks:
+      guests:  { ipv4_address: 172.31.30.5 }
+
+  web:
+    image: busybox:1.37
+    command: [httpd, -f, -p, "80", -h, /tmp]
+    networks:
+      servers: { ipv4_address: 172.31.20.20 }
+
+networks:
+  mgmt:    { internal: true, ipam: { config: [{ subnet: 172.31.10.0/24 }] } }
+  servers: { internal: true, ipam: { config: [{ subnet: 172.31.20.0/24 }] } }
+  guests:  { internal: true, ipam: { config: [{ subnet: 172.31.30.0/24 }] } }
