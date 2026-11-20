@@ -37,3 +37,12 @@ flows:
     to: mgmt
     ports: [22/tcp, icmp]
     expect: deny
+
+# The lab's "alerts" container logs whatever it receives: ./lab.sh alerts
+alerts:
+  - type: ntfy
+    url: http://172.31.10.30:8080/cgi-bin/hook/ntfy
+  - type: webhook
+    url: http://172.31.10.30:8080/cgi-bin/hook/webhook
+  - type: healthchecks
+    url: http://172.31.10.30:8080/cgi-bin/hook/healthchecks

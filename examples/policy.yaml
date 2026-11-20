@@ -41,6 +41,14 @@ flows:
     ports: [443/tcp]
     expect: allow
 
+# Alerts are sent by the controller. ntfy and webhook get one message per
+# batch of state changes (failing, recovered, probe silent, reporting again);
+# healthchecks gets a heartbeat: success when all is well, /fail otherwise.
 alerts:
   - type: ntfy
     url: https://ntfy.sh/replace-with-a-secret-topic
+    # token_file: /etc/segwatch/ntfy.token   # optional bearer token
+  # - type: webhook
+  #   url: https://hooks.example.org/segwatch
+  # - type: healthchecks
+  #   url: https://hc-ping.com/your-uuid

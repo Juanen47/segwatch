@@ -5,7 +5,7 @@ talk to which, on which ports. Small probes inside each network test those
 flows and tell you when reality drifts from the policy.
 
 > Status: early draft (v0.1 in progress). Single-host mode, probes, the
-> controller and its history work today; alerts and reports are on the way.
+> controller, its history and alerts work today; reports are on the way.
 > [Leer en español](README.es.md).
 
 ## Why
@@ -125,6 +125,32 @@ segwatch status --data /var/lib/segwatch   # exit 1 if any check fails or is sta
   and results it sends for anything else are discarded.
 * History lives in SQLite; state changes (pass to fail and back) are logged.
 
+### Alerts
+
+The controller sends alerts to the channels listed under `alerts:` in the
+policy:
+
+| Type           | What it gets                                                                 |
+|----------------|------------------------------------------------------------------------------|
+| `ntfy`         | A short message per batch of changes: failing (high priority), recovered, probe silent, reporting again |
+| `webhook`      | The same events as JSON: `{"source":"segwatch","events":[{check_id, flow, from, to, port, expect, outcome, pass, previous_outcome, kind, at}]}` |
+| `healthchecks` | A heartbeat every interval (at most 5 min): success when every check passes and none is stale, `/fail` with the failing list otherwise. If the controller dies, the pings stop and Healthchecks alerts you |
+
+```yaml
+alerts:
+  - type: ntfy
+    url: https://ntfy.sh/a-long-secret-topic
+    token_file: /etc/segwatch/ntfy.token   # optional bearer token, also for webhook
+  - type: healthchecks
+    url: https://hc-ping.com/your-uuid
+```
+
+A check counts as stale (its probe went silent) after 3 intervals with no
+result; change it with `segwatch controller --stale`. Send a test alert to
+every channel with `segwatch alert test -p policy.yaml`. Alert URLs are
+never written to the log, because ntfy topics and Healthchecks UUIDs work
+as passwords.
+
 Permissions: no root needed. Ports below 1024 need `CAP_NET_BIND_SERVICE`
 for the responder; ICMP uses unprivileged ping sockets
 (`net.ipv4.ping_group_range`) or falls back to `CAP_NET_RAW`.
@@ -142,6 +168,7 @@ cd examples/lab
 ./lab.sh drift    # simulate a firewall mistake: guests reach the servers
 ./lab.sh status   # the 5 guest-to-server checks now FAIL
 ./lab.sh heal     # undo it; back to 0 failing
+./lab.sh alerts   # what ntfy, the webhook and Healthchecks received
 ./lab.sh down
 ```
 
@@ -159,7 +186,7 @@ go test ./...
 - [x] Responder and single-host `run` mode
 - [x] Controller: probes authenticate with a token over pinned TLS and pull their checks
 - [x] Scheduling on the probe, SQLite history and state-change detection
-- [ ] Alerts: webhook, ntfy, Healthchecks
+- [x] Alerts: webhook, ntfy, Healthchecks
 - [ ] HTML report with the expected-vs-observed matrix
 - [ ] Checkmk local check and Prometheus metrics
 - [ ] IPv6 flows, release binaries

@@ -88,6 +88,9 @@ type Flow struct {
 type Alert struct {
 	Type string `yaml:"type"`
 	URL  string `yaml:"url"`
+	// TokenFile optionally holds a bearer token sent to ntfy or a webhook.
+	// It is a path so that secrets stay out of the policy file.
+	TokenFile string `yaml:"token_file"`
 }
 
 // Port is a parsed entry of Flow.Ports such as "22/tcp" or "icmp".
@@ -270,6 +273,9 @@ func (p *Policy) validate() error {
 		}
 		if !strings.HasPrefix(a.URL, "https://") && !strings.HasPrefix(a.URL, "http://") {
 			add("alert #%d: url must start with https:// or http://", i+1)
+		}
+		if a.TokenFile != "" && a.Type == "healthchecks" {
+			add("alert #%d: token_file is not used by healthchecks", i+1)
 		}
 	}
 

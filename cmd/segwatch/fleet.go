@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/Juanen47/segwatch/internal/agent"
+	"github.com/Juanen47/segwatch/internal/alert"
+	"github.com/Juanen47/segwatch/internal/api"
 	"github.com/Juanen47/segwatch/internal/controller"
 	"github.com/Juanen47/segwatch/internal/pki"
 	"github.com/Juanen47/segwatch/internal/store"
@@ -52,6 +54,7 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 	listen := fs.String("listen", ":8443", "address to listen on")
 	keep := fs.Duration("keep", 90*24*time.Hour, "how long to keep raw results")
 	debug := fs.Bool("debug", false, "verbose logging")
+	stale := fs.Duration("stale", 0, "alert when a check has no result for this long (default: 3 policy intervals)")
 	pol, ok := loadPolicy(fs, args, stderr)
 	if !ok {
 		return 2
@@ -61,6 +64,10 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 		return 2
 	}
 	log := newLogger(stderr, *debug)
+	interval := pol.Defaults.Interval.Std()
+	if *stale <= 0 {
+		*stale = 3 * interval
+	}
 
 	cert, err := pki.LoadOrCreate(*data)
 	if err != nil {
@@ -79,7 +86,9 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 	}
 	defer st.Close()
 
-	srv := &controller.Server{Policy: pol, Tokens: toks, Store: st, Log: log}
+	alerts := alert.New(pol.Alerts, *stale, log)
+	srv := &controller.Server{Policy: pol, Tokens: toks, Store: st, Log: log,
+		OnChange: func(cs []store.Change) { alerts.Notify(alert.FromChanges(cs)) }}
 	hs := &http.Server{
 		Addr:              *listen,
 		Handler:           srv.Handler(),
@@ -110,13 +119,40 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 		}
 	}()
 
+	if len(pol.Alerts) > 0 {
+		go heartbeat(ctx, st, alerts, interval, *stale, log)
+	}
+
 	fmt.Fprintf(stdout, "controller fingerprint: %s\n", pki.Fingerprint(cert))
 	log.Info("controller listening", "addr", *listen, "probes_with_token", len(toks.Probes()))
 	if err := hs.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("listen", "err", err)
 		return 2
 	}
+	alerts.Wait()
 	return 0
+}
+
+// heartbeat sends the overall status to the alert channels once per policy
+// interval (at least every 5 minutes, so a silent probe is noticed soon).
+// The first one waits a full period, so probes have time to report.
+func heartbeat(ctx context.Context, st *store.Store, d *alert.Dispatcher, interval, stale time.Duration, log *slog.Logger) {
+	every := min(interval, 5*time.Minute)
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		status, err := st.Status(ctx, time.Now().UTC(), stale)
+		if err != nil {
+			log.Error("status for heartbeat", "err", err)
+			continue
+		}
+		d.Heartbeat(status)
+	}
 }
 
 func cmdToken(args []string, stdout, stderr io.Writer) int {
@@ -300,5 +336,31 @@ func cmdProbe(ctx context.Context, args []string, stderr io.Writer) int {
 		log.Error("probe", "err", err)
 		return 2
 	}
+	return 0
+}
+
+func cmdAlert(args []string, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] != "test" {
+		fmt.Fprintln(stderr, "usage: segwatch alert test -p policy.yaml")
+		return 2
+	}
+	fs := flag.NewFlagSet("alert test", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	pol, ok := loadPolicy(fs, args[1:], stderr)
+	if !ok {
+		return 2
+	}
+	if len(pol.Alerts) == 0 {
+		fmt.Fprintln(stderr, "the policy has no alerts")
+		return 2
+	}
+	d := alert.New(pol.Alerts, time.Hour, newLogger(stderr, false))
+	// Healthchecks gets a success ping, so the test does not leave it red.
+	failed := d.Test(api.Status{Generated: time.Now().UTC()})
+	if failed > 0 {
+		fmt.Fprintf(stderr, "%d of %d alert channels failed\n", failed, len(pol.Alerts))
+		return 1
+	}
+	fmt.Fprintf(stdout, "sent a test alert to %d channels\n", len(pol.Alerts))
 	return 0
 }
