@@ -204,7 +204,7 @@ la política:
 | Tipo           | Qué recibe                                                                   |
 |----------------|------------------------------------------------------------------------------|
 | `ntfy`         | Un mensaje corto por cada tanda de cambios: falla (prioridad alta), se recupera, sonda callada, vuelve a informar |
-| `webhook`      | Los mismos eventos en JSON: `{"source":"segwatch","events":[{check_id, flow, from, to, port, expect, outcome, pass, previous_outcome, kind, at}]}` |
+| `webhook`      | Los mismos eventos en JSON: `{"source":"segwatch","events":[{check_id, flow, from, to, port, expect, outcome, pass, previous_outcome, kind, at, last_seen}]}` |
 | `healthchecks` | Un latido en cada intervalo (como mucho cada 5 min): éxito si todo cumple y nada está desfasado, `/fail` con la lista de fallos si no. Si el controlador se cae, dejan de llegar latidos y avisa Healthchecks |
 
 ```yaml
