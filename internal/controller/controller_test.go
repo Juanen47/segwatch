@@ -191,3 +191,125 @@ func TestProbesEndToEnd(t *testing.T) {
 		}
 	}
 }
+
+// A deny check towards a probe is only trusted while that probe is alive:
+// when the destination is down, "no answer" proves nothing about the filter.
+func TestDenyTowardsSilentProbeIsUnverified(t *testing.T) {
+	pol, err := policy.Parse([]byte(`
+version: 1
+defaults: { interval: 1m, timeout: 1s }
+networks:
+  a: { cidr: 10.0.0.0/24, probe: { name: pa, address: 10.0.0.5 } }
+  b: { cidr: 10.0.1.0/24, probe: { name: pb, address: 10.0.1.5 } }
+targets:
+  web: { address: 10.0.1.80, network: b }
+flows:
+  - { name: a-blocked-from-b, from: a, to: b, ports: [22/tcp], expect: deny }
+  - { name: a-blocked-from-web, from: a, to: web, ports: [22/tcp], expect: deny }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	toks, _ := tokens.Open(dir)
+	st, err := store.Open(filepath.Join(dir, "db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	clock := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	c := &controller.Server{Policy: pol, Tokens: toks, Store: st, SilentAfter: 3 * time.Minute,
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: func() time.Time { return clock }}
+	c.Start()
+	srv := httptest.NewServer(c.Handler())
+	defer srv.Close()
+
+	tokA, _ := toks.Add("pa")
+	tokB, _ := toks.Add("pb")
+	call := func(method, path, tok string, body any) {
+		t.Helper()
+		var r io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			r = bytes.NewReader(b)
+		}
+		req, _ := http.NewRequest(method, srv.URL+path, r)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode >= 300 {
+			t.Fatalf("%s %s: %s", method, path, resp.Status)
+		}
+	}
+	checks, _ := pol.ChecksFrom("a")
+	report := func() map[string]api.CheckState {
+		t.Helper()
+		rep := api.Report{StartedAt: clock}
+		for _, ch := range checks {
+			rep.Results = append(rep.Results, api.Result{CheckID: ch.ID(), Outcome: "blocked", Pass: true})
+		}
+		call("POST", api.ResultsPath, tokA, rep)
+		s, err := st.Status(context.Background(), clock, time.Hour)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]api.CheckState{}
+		for _, cs := range s.Checks {
+			out[cs.Flow] = cs
+		}
+		return out
+	}
+
+	// Inside the start-up grace period nothing is downgraded yet.
+	if got := report(); !got["a-blocked-from-b"].Pass {
+		t.Errorf("grace period: %+v", got["a-blocked-from-b"])
+	}
+
+	// pb never shows up: the deny towards it cannot be verified...
+	clock = clock.Add(4 * time.Minute)
+	got := report()
+	if cs := got["a-blocked-from-b"]; cs.Pass || cs.Outcome != controller.Unverified {
+		t.Errorf("silent destination: %+v", cs)
+	}
+	// ...but a deny towards a real host (no responder) is unaffected.
+	if cs := got["a-blocked-from-web"]; !cs.Pass || cs.Outcome != "blocked" {
+		t.Errorf("real target: %+v", cs)
+	}
+
+	// pb comes back: the block is trusted again.
+	call("GET", api.JobsPath, tokB, nil)
+	clock = clock.Add(time.Minute)
+	if cs := report()["a-blocked-from-b"]; !cs.Pass || cs.Outcome != "blocked" {
+		t.Errorf("destination back: %+v", cs)
+	}
+
+	// pb goes quiet again after having been seen.
+	clock = clock.Add(5 * time.Minute)
+	if cs := report()["a-blocked-from-b"]; cs.Pass || cs.Outcome != controller.Unverified {
+		t.Errorf("destination silent again: %+v", cs)
+	}
+}
+
+// A probe whose responder cannot listen must exit rather than keep polling:
+// polling would keep it "alive" while checks towards it see nothing.
+func TestProbeExitsWhenResponderCannotListen(t *testing.T) {
+	e := setup(t)
+	busy, err := net.Listen("tcp", fmt.Sprintf("127.0.1.5:%d", e.allowP))
+	if err != nil {
+		t.Skip("cannot bind 127.0.1.5 on this host:", err)
+	}
+	defer busy.Close()
+	tokB, _ := e.toks.Add("pb")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = agent.Run(ctx, agent.Config{
+		Controller: e.srv.URL, Fingerprint: e.fp, Token: tokB, Bind: "127.0.1.5",
+		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), RetryAfter: 100 * time.Millisecond,
+	})
+	if err == nil || ctx.Err() != nil {
+		t.Fatalf("agent.Run = %v (ctx %v), want a responder error", err, ctx.Err())
+	}
+}

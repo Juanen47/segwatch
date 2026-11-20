@@ -53,6 +53,11 @@ func Run(ctx context.Context, cfg Config) error {
 	var stopResponder context.CancelFunc
 	var responderDone chan struct{}
 	var listening []policy.Port
+	// A responder that cannot listen must stop the probe: if the probe kept
+	// polling the controller with no listeners, checks towards it would see
+	// resets or silence and a deny rule would look enforced. Exiting makes the
+	// probe go silent, which the controller reports.
+	responderErr := make(chan error, 1)
 	stop := func() {
 		if stopResponder != nil {
 			stopResponder()
@@ -74,8 +79,11 @@ func Run(ctx context.Context, cfg Config) error {
 				stopResponder, responderDone, listening = cancel, done, job.ListenPorts
 				go func(ports []policy.Port) {
 					defer close(done)
-					if err := responder.Serve(rctx, cfg.Bind, ports, cfg.Log); err != nil {
-						cfg.Log.Error("responder", "err", err)
+					if err := responder.Serve(rctx, cfg.Bind, ports, cfg.Log); err != nil && rctx.Err() == nil {
+						select {
+						case responderErr <- err:
+						default:
+						}
 					}
 				}(job.ListenPorts)
 			}
@@ -95,6 +103,8 @@ func Run(ctx context.Context, cfg Config) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case err := <-responderErr:
+			return fmt.Errorf("responder: %w", err)
 		case <-time.After(wait):
 		}
 	}

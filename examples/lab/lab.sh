@@ -1,8 +1,8 @@
 #!/bin/sh
 # segwatch lab on Docker: three isolated networks, a controller, three probes
 # one real web server and an alert receiver.
-# Usage: ./lab.sh up | status | drift | heal | alerts | report | metrics |
-#        checkmk | down
+# Usage: ./lab.sh up | status | drift | heal | outage | restore | alerts |
+#        report | metrics | checkmk | down
 # Dual-stack (every check over IPv4 and IPv6): IPV6=1 ./lab.sh <command>
 set -eu
 cd "$(dirname "$0")"
@@ -42,6 +42,13 @@ drift)
 heal)
   docker network disconnect segwatch-lab_servers segwatch-lab-probe-guests-1
   echo "fixed; wait ~20s, then: ./lab.sh status" ;;
+outage)
+  # the servers probe dies: denies towards it must not stay green
+  docker compose stop probe-servers
+  echo "servers probe stopped; wait ~40s (3 intervals), then: ./lab.sh status" ;;
+restore)
+  docker compose start probe-servers
+  echo "servers probe back; wait ~20s, then: ./lab.sh status" ;;
 report)
   sw report -p /lab/$POLICY --data /lab/data -o /lab/data/report.html || true
   cp data/report.html report.html && echo "open examples/lab/report.html" ;;
@@ -49,5 +56,5 @@ metrics) docker compose exec -T alerts wget -qO- http://172.31.10.10:9469/metric
 checkmk) sw checkmk --data /lab/data --stale 1m ;;
 alerts) docker compose exec -T alerts cat /tmp/alerts.log 2>/dev/null || echo "no alerts yet" ;;
 down) docker compose down -v; rm -rf data segwatch report.html ;;
-*) echo "usage: $0 up|status|drift|heal|alerts|report|metrics|checkmk|down" >&2; exit 2 ;;
+*) echo "usage: $0 up|status|drift|heal|outage|restore|alerts|report|metrics|checkmk|down" >&2; exit 2 ;;
 esac

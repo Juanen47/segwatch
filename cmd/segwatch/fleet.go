@@ -103,7 +103,8 @@ func cmdController(ctx context.Context, args []string, stdout, stderr io.Writer)
 
 	alerts := alert.New(pol.Alerts, *stale, log)
 	srv := &controller.Server{Policy: pol, Tokens: toks, Store: st, Log: log,
-		OnChange: func(cs []store.Change) { alerts.Notify(alert.FromChanges(cs)) }}
+		OnChange: func(cs []store.Change) { alerts.Notify(alert.FromChanges(cs)) }, SilentAfter: *stale}
+	srv.Start()
 	hs := &http.Server{
 		Addr:              *listen,
 		Handler:           srv.Handler(),
