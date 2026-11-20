@@ -92,8 +92,8 @@ type Alert struct {
 
 // Port is a parsed entry of Flow.Ports such as "22/tcp" or "icmp".
 type Port struct {
-	Number int
-	Proto  Proto
+	Number int   `json:"number,omitempty"`
+	Proto  Proto `json:"proto"`
 }
 
 func (p Port) String() string {
@@ -302,14 +302,14 @@ func ParsePort(s string) (Port, error) {
 
 // Check is one concrete test derived from a flow: one destination, one port.
 type Check struct {
-	Flow      string
-	From      string
-	To        string
-	Address   netip.Addr
-	Port      Port
-	Expect    Expectation
-	Timeout   time.Duration
-	Responder bool // destination is a segwatch probe that answers on every port
+	Flow      string        `json:"flow"`
+	From      string        `json:"from"`
+	To        string        `json:"to"`
+	Address   netip.Addr    `json:"address"`
+	Port      Port          `json:"port"`
+	Expect    Expectation   `json:"expect"`
+	Timeout   time.Duration `json:"timeout_ns"`
+	Responder bool          `json:"responder"` // destination is a segwatch probe that answers on every port
 }
 
 // ID is a stable identifier for a check, used for history and alerts.
@@ -379,6 +379,16 @@ func (p *Policy) destination(to string) (netip.Addr, bool) {
 		return n.Probe.addr, true
 	}
 	return p.Targets[to].addr, false
+}
+
+// NetworkOfProbe returns the network a probe name belongs to.
+func (p *Policy) NetworkOfProbe(probe string) (string, bool) {
+	for name, n := range p.Networks {
+		if n.Probe.Name == probe {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // NetworkNames returns network names in a stable order.

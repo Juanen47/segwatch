@@ -54,16 +54,22 @@ const Magic = "SEGW1 "
 
 // Run executes c and evaluates the outcome against c.Expect.
 func Run(ctx context.Context, c policy.Check) Result {
+	return RunFrom(ctx, c, netip.Addr{})
+}
+
+// RunFrom is Run with a fixed source address (zero value: let the kernel pick).
+// Fixing it makes a probe with several interfaces test from the right network.
+func RunFrom(ctx context.Context, c policy.Check, src netip.Addr) Result {
 	start := time.Now()
 	var out Outcome
 	var detail string
 	switch c.Port.Proto {
 	case policy.TCP:
-		out, detail = tcp(ctx, c)
+		out, detail = tcp(ctx, c, src)
 	case policy.UDP:
-		out, detail = udp(ctx, c)
+		out, detail = udp(ctx, c, src)
 	case policy.ICMP:
-		out, detail = ping(ctx, c)
+		out, detail = ping(ctx, c, src)
 	default:
 		out, detail = Error, "unsupported protocol"
 	}
@@ -110,8 +116,11 @@ func Evaluate(c policy.Check, out Outcome) (bool, string) {
 	return false, "invalid expectation"
 }
 
-func tcp(ctx context.Context, c policy.Check) (Outcome, string) {
+func tcp(ctx context.Context, c policy.Check, src netip.Addr) (Outcome, string) {
 	d := net.Dialer{Timeout: c.Timeout}
+	if src.IsValid() {
+		d.LocalAddr = &net.TCPAddr{IP: src.AsSlice()}
+	}
 	addr := netip.AddrPortFrom(c.Address, uint16(c.Port.Number)).String()
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
@@ -135,8 +144,11 @@ func tcp(ctx context.Context, c policy.Check) (Outcome, string) {
 	return Open, ""
 }
 
-func udp(ctx context.Context, c policy.Check) (Outcome, string) {
+func udp(ctx context.Context, c policy.Check, src netip.Addr) (Outcome, string) {
 	d := net.Dialer{Timeout: c.Timeout}
+	if src.IsValid() {
+		d.LocalAddr = &net.UDPAddr{IP: src.AsSlice()}
+	}
 	addr := netip.AddrPortFrom(c.Address, uint16(c.Port.Number)).String()
 	conn, err := d.DialContext(ctx, "udp", addr)
 	if err != nil {
@@ -164,7 +176,11 @@ func udp(ctx context.Context, c policy.Check) (Outcome, string) {
 	return Open, ""
 }
 
-func ping(ctx context.Context, c policy.Check) (Outcome, string) {
+func ping(ctx context.Context, c policy.Check, src netip.Addr) (Outcome, string) {
+	listenAddr := ""
+	if src.IsValid() {
+		listenAddr = src.String()
+	}
 	network, proto := "udp4", 1
 	var typ icmp.Type = ipv4.ICMPTypeEcho
 	var reply icmp.Type = ipv4.ICMPTypeEchoReply
@@ -176,14 +192,14 @@ func ping(ctx context.Context, c policy.Check) (Outcome, string) {
 	// the user's group (the default on most current distributions).
 	// Falls back to a raw socket when running with CAP_NET_RAW.
 	raw := false
-	conn, err := icmp.ListenPacket(network, "")
+	conn, err := icmp.ListenPacket(network, listenAddr)
 	if err != nil {
 		rawNet := "ip4:icmp"
 		if c.Address.Is6() {
 			rawNet = "ip6:ipv6-icmp"
 		}
 		var rawErr error
-		if conn, rawErr = icmp.ListenPacket(rawNet, ""); rawErr != nil {
+		if conn, rawErr = icmp.ListenPacket(rawNet, listenAddr); rawErr != nil {
 			return Error, "cannot open ICMP socket (allow the user in net.ipv4.ping_group_range or grant CAP_NET_RAW): " + err.Error()
 		}
 		raw = true

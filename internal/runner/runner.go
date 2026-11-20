@@ -3,6 +3,7 @@ package runner
 
 import (
 	"context"
+	"net/netip"
 	"sort"
 	"sync"
 	"time"
@@ -13,8 +14,9 @@ import (
 
 // Options limit how hard a run hits the network.
 type Options struct {
-	Concurrency int // parallel checks, default 8
-	PerSecond   int // checks started per second, default 20
+	Concurrency int        // parallel checks, default 8
+	PerSecond   int        // checks started per second, default 20
+	Source      netip.Addr // optional fixed source address
 }
 
 // Run executes every check and returns the results sorted by flow and port.
@@ -42,7 +44,7 @@ func Run(ctx context.Context, checks []policy.Check, opt Options) []check.Result
 		wg.Add(1)
 		go func(i int, c policy.Check) {
 			defer func() { <-sem; wg.Done() }()
-			results[i] = check.Run(ctx, c)
+			results[i] = check.RunFrom(ctx, c, opt.Source)
 		}(i, c)
 	}
 	wg.Wait()

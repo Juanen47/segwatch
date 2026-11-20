@@ -1,5 +1,7 @@
 # Security
 
+[Leer en español](SECURITY.es.md)
+
 segwatch sends packets between networks. Only run it on networks you own
 or have written permission to test.
 

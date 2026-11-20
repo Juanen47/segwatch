@@ -26,10 +26,21 @@ var version = "dev"
 
 const usage = `segwatch: continuous network segmentation testing
 
-Usage:
+Single host:
   segwatch validate -p policy.yaml
-  segwatch run      -p policy.yaml --from <network> [--json]
+  segwatch run      -p policy.yaml --from <network> [--source addr] [--json]
   segwatch respond  -p policy.yaml --network <network> [--bind addr]
+
+Controller and probes:
+  segwatch controller  -p policy.yaml --data <dir> [--listen :8443]
+  segwatch token add   -p policy.yaml --data <dir> <probe-name>
+  segwatch token list  --data <dir>
+  segwatch token revoke --data <dir> <probe-name>
+  segwatch fingerprint --data <dir>
+  segwatch status      --data <dir> [--json]
+  segwatch probe --controller https://host:8443 --fingerprint sha256:... --token-file <file>
+                 [--bind addr] [--source addr]
+
   segwatch version
 
 Exit codes for run: 0 all flows match the policy, 1 at least one does not,
@@ -57,6 +68,16 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		return cmdRun(ctx, args[1:], stdout, stderr)
 	case "respond":
 		return cmdRespond(ctx, args[1:], stderr)
+	case "controller":
+		return cmdController(ctx, args[1:], stdout, stderr)
+	case "token":
+		return cmdToken(args[1:], stdout, stderr)
+	case "fingerprint":
+		return cmdFingerprint(args[1:], stdout, stderr)
+	case "status":
+		return cmdStatus(args[1:], stdout, stderr)
+	case "probe":
+		return cmdProbe(ctx, args[1:], stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, "segwatch", version)
 		return 0
@@ -106,8 +127,14 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	asJSON := fs.Bool("json", false, "print results as JSON")
 	conc := fs.Int("concurrency", 8, "parallel checks")
 	rate := fs.Int("rate", 20, "checks started per second")
+	source := fs.String("source", "", "fixed source address for checks (default: chosen by the kernel)")
 	pol, ok := loadPolicy(fs, args, stderr)
 	if !ok {
+		return 2
+	}
+	src, err := parseOptionalAddr(*source)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	if *from == "" {
@@ -124,7 +151,7 @@ func cmdRun(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 
-	results := runner.Run(ctx, checks, runner.Options{Concurrency: *conc, PerSecond: *rate})
+	results := runner.Run(ctx, checks, runner.Options{Concurrency: *conc, PerSecond: *rate, Source: src})
 	if *asJSON {
 		writeJSON(stdout, results)
 	} else {
