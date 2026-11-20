@@ -60,6 +60,9 @@ dar señales (3 intervalos por defecto), un `deny` que parecía cumplirse se
 guarda como `unverified` y cuenta como fallo. Una sonda cuyo respondedor no
 puede escuchar se cierra en vez de seguir consultando, así que un respondedor
 roto se detecta igual.
+Los resultados hacia una sonda que se conectó por primera vez hace menos de
+5 segundos se descartan, para que el orden de arranque de las sondas no dé
+falsas alarmas.
 
 ## Política
 
