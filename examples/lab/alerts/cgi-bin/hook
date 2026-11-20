@@ -1,0 +1,9 @@
+#!/bin/sh
+# Minimal alert receiver for the lab: appends each request to /tmp/alerts.log.
+{
+  echo "--- $(date -u +%H:%M:%S) $REQUEST_METHOD $SCRIPT_NAME$PATH_INFO"
+  [ -n "${HTTP_TITLE:-}" ] && echo "Title: $HTTP_TITLE"
+  head -c "${CONTENT_LENGTH:-0}"
+  echo
+} >> /tmp/alerts.log
+printf 'Content-Type: text/plain\r\n\r\nok\n'

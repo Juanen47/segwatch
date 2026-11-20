@@ -1,6 +1,7 @@
 #!/bin/sh
 # segwatch lab on Docker: three isolated networks, a controller, three probes
-# and one real web server. Usage: ./lab.sh up | status | drift | heal | down
+# one real web server and an alert receiver.
+# Usage: ./lab.sh up | status | drift | heal | alerts | down
 set -eu
 cd "$(dirname "$0")"
 sw() { docker compose exec -T controller /segwatch "$@"; }
@@ -29,6 +30,7 @@ drift)
 heal)
   docker network disconnect segwatch-lab_servers segwatch-lab-probe-guests-1
   echo "fixed; wait ~20s, then: ./lab.sh status" ;;
+alerts) docker compose exec -T alerts cat /tmp/alerts.log 2>/dev/null || echo "no alerts yet" ;;
 down) FP=x docker compose down -v; rm -rf data segwatch ;;
-*) echo "usage: $0 up|status|drift|heal|down" >&2; exit 2 ;;
+*) echo "usage: $0 up|status|drift|heal|alerts|down" >&2; exit 2 ;;
 esac

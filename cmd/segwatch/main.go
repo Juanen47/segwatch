@@ -38,6 +38,7 @@ Controller and probes:
   segwatch token revoke --data <dir> <probe-name>
   segwatch fingerprint --data <dir>
   segwatch status      --data <dir> [--json]
+  segwatch alert test  -p policy.yaml
   segwatch probe --controller https://host:8443 --fingerprint sha256:... --token-file <file>
                  [--bind addr] [--source addr]
 
@@ -78,6 +79,8 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(args[1:], stdout, stderr)
 	case "probe":
 		return cmdProbe(ctx, args[1:], stderr)
+	case "alert":
+		return cmdAlert(args[1:], stdout, stderr)
 	case "version", "--version", "-v":
 		fmt.Fprintln(stdout, "segwatch", version)
 		return 0

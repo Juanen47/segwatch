@@ -5,8 +5,8 @@ con cuál y por qué puertos. Unas sondas pequeñas dentro de cada red prueban
 esos flujos y te avisan cuando la realidad se aparta de la política.
 
 > Estado: borrador (v0.1 en desarrollo). Ya funcionan el modo de un solo
-> equipo, las sondas, el controlador y su historial; los avisos y el informe
-> vienen después. [Read in English](README.md).
+> equipo, las sondas, el controlador, su historial y los avisos; el informe
+> viene después. [Read in English](README.md).
 
 ## Por qué
 
@@ -132,6 +132,32 @@ segwatch status --data /var/lib/segwatch   # sale con 1 si alguna prueba falla o
 * El historial se guarda en SQLite y se registran los cambios de estado (de
   cumple a falla y al revés).
 
+### Avisos
+
+El controlador envía avisos a los canales que pongas en `alerts:` dentro de
+la política:
+
+| Tipo           | Qué recibe                                                                   |
+|----------------|------------------------------------------------------------------------------|
+| `ntfy`         | Un mensaje corto por cada tanda de cambios: falla (prioridad alta), se recupera, sonda callada, vuelve a informar |
+| `webhook`      | Los mismos eventos en JSON: `{"source":"segwatch","events":[{check_id, flow, from, to, port, expect, outcome, pass, previous_outcome, kind, at}]}` |
+| `healthchecks` | Un latido en cada intervalo (como mucho cada 5 min): éxito si todo cumple y nada está desfasado, `/fail` con la lista de fallos si no. Si el controlador se cae, dejan de llegar latidos y avisa Healthchecks |
+
+```yaml
+alerts:
+  - type: ntfy
+    url: https://ntfy.sh/un-tema-largo-y-secreto
+    token_file: /etc/segwatch/ntfy.token   # token bearer opcional, también para webhook
+  - type: healthchecks
+    url: https://hc-ping.com/tu-uuid
+```
+
+Una prueba se da por desfasada (su sonda se ha callado) tras 3 intervalos
+sin resultado; se cambia con `segwatch controller --stale`. Para mandar un
+aviso de prueba a todos los canales: `segwatch alert test -p policy.yaml`.
+Las URL de los avisos nunca se escriben en el log, porque los temas de ntfy
+y los UUID de Healthchecks valen como contraseñas.
+
 Permisos: no necesita root. El respondedor necesita `CAP_NET_BIND_SERVICE`
 para puertos por debajo de 1024, y el ping usa sockets ICMP sin privilegios
 (`net.ipv4.ping_group_range`) o, si no, `CAP_NET_RAW`.
@@ -149,6 +175,7 @@ cd examples/lab
 ./lab.sh drift    # simula un error en el cortafuegos: invitados llega a servidores
 ./lab.sh status   # las 5 pruebas de invitados a servidores FALLAN
 ./lab.sh heal     # lo deshace; vuelve a 0 fallos
+./lab.sh alerts   # lo que han recibido ntfy, el webhook y Healthchecks
 ./lab.sh down
 ```
 
@@ -166,7 +193,7 @@ go test ./...
 - [x] Respondedor y modo `run` de un solo equipo
 - [x] Controlador: las sondas se autentican con un token sobre TLS fijado y piden sus pruebas
 - [x] Planificación en la sonda, historial en SQLite y detección de cambios de estado
-- [ ] Avisos: webhook, ntfy, Healthchecks
+- [x] Avisos: webhook, ntfy, Healthchecks
 - [ ] Informe HTML con la matriz esperado frente a observado
 - [ ] Check local de Checkmk y métricas de Prometheus
 - [ ] Flujos IPv6 y binarios publicados
