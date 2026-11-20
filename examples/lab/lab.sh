@@ -1,7 +1,8 @@
 #!/bin/sh
 # segwatch lab on Docker: three isolated networks, a controller, three probes
 # one real web server and an alert receiver.
-# Usage: ./lab.sh up | status | drift | heal | alerts | report | down
+# Usage: ./lab.sh up | status | drift | heal | alerts | report | metrics |
+#        checkmk | down
 set -eu
 cd "$(dirname "$0")"
 sw() { docker compose exec -T controller /segwatch "$@"; }
@@ -33,7 +34,9 @@ heal)
 report)
   sw report -p /lab/policy.yaml --data /lab/data -o /lab/data/report.html || true
   cp data/report.html report.html && echo "open examples/lab/report.html" ;;
+metrics) docker compose exec -T alerts wget -qO- http://172.31.10.10:9469/metrics ;;
+checkmk) sw checkmk --data /lab/data --stale 1m ;;
 alerts) docker compose exec -T alerts cat /tmp/alerts.log 2>/dev/null || echo "no alerts yet" ;;
 down) FP=x docker compose down -v; rm -rf data segwatch report.html ;;
-*) echo "usage: $0 up|status|drift|heal|alerts|report|down" >&2; exit 2 ;;
+*) echo "usage: $0 up|status|drift|heal|alerts|report|metrics|checkmk|down" >&2; exit 2 ;;
 esac

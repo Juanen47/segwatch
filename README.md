@@ -5,7 +5,8 @@ talk to which, on which ports. Small probes inside each network test those
 flows and tell you when reality drifts from the policy.
 
 > Status: early draft (v0.1 in progress). Single-host mode, probes, the
-> controller, its history, alerts and the HTML report work today.
+> controller, its history, alerts, the HTML report and Prometheus/Checkmk
+> export work today.
 > [Leer en español](README.es.md).
 
 ## Why
@@ -144,6 +145,37 @@ you can archive it or attach it to an audit:
 It exits 1 when any check fails or is stale, so a cron job can mail it only
 when something is wrong. It reads the history and needs no running controller.
 
+### Monitoring: Prometheus and Checkmk
+
+**Prometheus.** Start the controller with `--metrics 127.0.0.1:9469` and
+scrape `/metrics` (plain HTTP, so keep it on localhost or a management
+network). Without a listener, `segwatch metrics --data <dir>` prints the same
+text for the node_exporter textfile collector:
+
+```sh
+segwatch metrics --data /var/lib/segwatch > /var/lib/node_exporter/segwatch.prom.tmp \
+  && mv /var/lib/node_exporter/segwatch.prom.tmp /var/lib/node_exporter/segwatch.prom
+```
+
+Totals: `segwatch_checks`, `segwatch_checks_failing` and
+`segwatch_checks_stale`. Per check, labelled with flow, from, to, port,
+expect, observed and probe: `segwatch_check_pass`, `segwatch_check_stale`,
+`segwatch_check_last_seen_timestamp_seconds` and
+`segwatch_check_since_timestamp_seconds`. A starting alert rule:
+`segwatch_checks_failing > 0 or segwatch_checks_stale > 0`.
+
+**Checkmk.** On the controller host, add a local check that prints one
+service per flow plus `segwatch summary` (CRIT when a check fails, WARN
+when one is stale, with metrics for graphs):
+
+```sh
+cat > /usr/lib/check_mk_agent/local/segwatch <<'SH'
+#!/bin/sh
+exec /usr/local/bin/segwatch checkmk --data /var/lib/segwatch
+SH
+chmod +x /usr/lib/check_mk_agent/local/segwatch
+```
+
 ### Alerts
 
 The controller sends alerts to the channels listed under `alerts:` in the
@@ -189,6 +221,8 @@ cd examples/lab
 ./lab.sh heal     # undo it; back to 0 failing
 ./lab.sh alerts   # what ntfy, the webhook and Healthchecks received
 ./lab.sh report   # writes examples/lab/report.html
+./lab.sh metrics  # Prometheus metrics from the controller
+./lab.sh checkmk  # Checkmk local check output
 ./lab.sh down
 ```
 
@@ -208,7 +242,7 @@ go test ./...
 - [x] Scheduling on the probe, SQLite history and state-change detection
 - [x] Alerts: webhook, ntfy, Healthchecks
 - [x] HTML report with the expected-vs-observed matrix
-- [ ] Checkmk local check and Prometheus metrics
+- [x] Checkmk local check and Prometheus metrics
 - [ ] IPv6 flows, release binaries
 
 ## Responsible use
