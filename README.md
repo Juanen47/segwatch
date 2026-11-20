@@ -58,6 +58,8 @@ contact with it. If the destination probe has not polled for longer than
 `--stale` (3 intervals by default), a passing `deny` towards it is recorded
 as `unverified` and counts as failing. A probe whose responder cannot listen
 exits instead of polling, so a broken responder is caught the same way.
+Results towards a probe that first polled less than 5 seconds ago are
+dropped, so probes starting in any order do not raise false alarms.
 
 ## Policy
 

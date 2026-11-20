@@ -263,14 +263,19 @@ flows:
 		return out
 	}
 
-	// Inside the start-up grace period nothing is downgraded yet.
-	if got := report(); !got["a-blocked-from-b"].Pass {
-		t.Errorf("grace period: %+v", got["a-blocked-from-b"])
+	// Inside the start-up grace period, results towards a probe not heard
+	// from yet are dropped: they would only measure start-up order.
+	got := report()
+	if cs, ok := got["a-blocked-from-b"]; ok {
+		t.Errorf("grace period: result stored: %+v", cs)
+	}
+	if cs := got["a-blocked-from-web"]; !cs.Pass || cs.From != "a" || cs.To != "web" {
+		t.Errorf("real target in grace period: %+v", cs)
 	}
 
 	// pb never shows up: the deny towards it cannot be verified...
 	clock = clock.Add(4 * time.Minute)
-	got := report()
+	got = report()
 	if cs := got["a-blocked-from-b"]; cs.Pass || cs.Outcome != controller.Unverified {
 		t.Errorf("silent destination: %+v", cs)
 	}
@@ -279,8 +284,14 @@ flows:
 		t.Errorf("real target: %+v", cs)
 	}
 
-	// pb comes back: the block is trusted again.
+	// pb comes back: right after its first poll its responder may not be
+	// listening yet, so that result is dropped (the old state stays)...
 	call("GET", api.JobsPath, tokB, nil)
+	clock = clock.Add(time.Second)
+	if cs := report()["a-blocked-from-b"]; cs.Outcome != controller.Unverified {
+		t.Errorf("destination settling: %+v", cs)
+	}
+	// ...and once it has settled the block is trusted again.
 	clock = clock.Add(time.Minute)
 	if cs := report()["a-blocked-from-b"]; !cs.Pass || cs.Outcome != "blocked" {
 		t.Errorf("destination back: %+v", cs)

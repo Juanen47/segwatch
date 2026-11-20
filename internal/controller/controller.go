@@ -39,10 +39,16 @@ type Server struct {
 	// Zero disables the rule.
 	SilentAfter time.Duration
 
-	mu        sync.Mutex
-	started   time.Time
-	lastHeard map[string]time.Time
+	mu         sync.Mutex
+	started    time.Time
+	lastHeard  map[string]time.Time
+	firstHeard map[string]time.Time
 }
+
+// settle is how long after a probe first contacts the controller its
+// responder is given to start listening. Results of checks towards it from
+// before then are dropped: they only measure probe start-up order.
+const settle = 5 * time.Second
 
 // Unverified is the outcome recorded for a deny check that looked blocked
 // while its destination probe was not in contact with the controller.
@@ -60,7 +66,10 @@ func (s *Server) heard(probe string, t time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lastHeard == nil {
-		s.lastHeard = map[string]time.Time{}
+		s.lastHeard, s.firstHeard = map[string]time.Time{}, map[string]time.Time{}
+	}
+	if _, ok := s.firstHeard[probe]; !ok {
+		s.firstHeard[probe] = t
 	}
 	s.lastHeard[probe] = t
 }
@@ -182,9 +191,13 @@ func (s *Server) results(w http.ResponseWriter, r *http.Request) {
 	}
 
 	at := s.now()
-	for i, res := range accepted {
-		accepted[i] = s.verifyDeny(known[res.CheckID], res, at)
+	verified := accepted[:0]
+	for _, res := range accepted {
+		if res, keep := s.verify(known[res.CheckID], res, at); keep {
+			verified = append(verified, res)
+		}
 	}
+	accepted = verified
 	changes, err := s.Store.Record(r.Context(), probe, at, known, accepted)
 	if err != nil {
 		s.Log.Error("store results", "err", err)
@@ -212,17 +225,34 @@ func (s *Server) results(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// verifyDeny downgrades a passing deny check towards a segwatch probe that
-// is not in contact with the controller. Without a live responder there,
-// "no answer" (or a reset from a host whose responder died) proves nothing.
-func (s *Server) verifyDeny(c policy.Check, res api.Result, at time.Time) api.Result {
-	if !c.Responder || c.Expect != policy.Deny || !res.Pass {
-		return res
+// ready reports whether probe has been in contact for at least settle, so
+// its responder should be listening.
+func (s *Server) ready(probe string, at time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	first, ok := s.firstHeard[probe]
+	return ok && at.Sub(first) >= settle
+}
+
+// verify checks a result towards a segwatch probe against what the
+// controller knows about that probe. keep is false when the result is
+// dropped because the destination probe is still starting.
+//
+// A passing deny towards a probe that is not in contact with the controller
+// is downgraded: without a live responder there, "no answer" (or a reset
+// from a host whose responder died) proves nothing.
+func (s *Server) verify(c policy.Check, res api.Result, at time.Time) (api.Result, bool) {
+	if !c.Responder {
+		return res, true
 	}
 	dest := s.Policy.Networks[c.To].Probe.Name
 	silent, last := s.silent(dest, at)
-	if !silent {
-		return res
+	if !silent && !s.ready(dest, at) {
+		s.Log.Debug("dropped result: destination probe still starting", "check", res.CheckID, "probe", dest)
+		return res, false
+	}
+	if !silent || c.Expect != policy.Deny || !res.Pass {
+		return res, true
 	}
 	res.Pass = false
 	res.Detail = fmt.Sprintf("observed %s, but destination probe %s is silent", res.Outcome, dest)
@@ -231,5 +261,5 @@ func (s *Server) verifyDeny(c policy.Check, res api.Result, at time.Time) api.Re
 	}
 	res.Detail += "; a block cannot be told apart from a host that is down"
 	res.Outcome = Unverified
-	return res
+	return res, true
 }

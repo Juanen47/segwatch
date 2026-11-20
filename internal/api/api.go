@@ -43,6 +43,8 @@ type CheckState struct {
 	CheckID string    `json:"check_id"`
 	Probe   string    `json:"probe"`
 	Flow    string    `json:"flow"`
+	From    string    `json:"from,omitempty"`
+	To      string    `json:"to,omitempty"`
 	Port    string    `json:"port"`
 	Expect  string    `json:"expect"`
 	Outcome string    `json:"outcome"`

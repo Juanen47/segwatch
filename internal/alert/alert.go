@@ -211,7 +211,7 @@ func (d *Dispatcher) Heartbeat(st api.Status) {
 
 func stateEvent(c api.CheckState, kind string, at time.Time) Event {
 	return Event{
-		CheckID: c.CheckID, Flow: c.Flow, Port: c.Port, Expect: c.Expect,
+		CheckID: c.CheckID, Flow: c.Flow, From: c.From, To: c.To, Port: c.Port, Expect: c.Expect,
 		Outcome: c.Outcome, Pass: c.Pass, Detail: c.Detail, Kind: kind, At: at,
 	}
 }

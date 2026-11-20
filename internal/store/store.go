@@ -39,6 +39,27 @@ CREATE TABLE IF NOT EXISTS state (
 	last_seen INTEGER NOT NULL
 );`
 
+// migrations add columns that later versions need to an existing database.
+var migrations = []struct{ table, column, def string }{
+	{"state", "src", "TEXT NOT NULL DEFAULT ''"},
+	{"state", "dst", "TEXT NOT NULL DEFAULT ''"},
+}
+
+func migrate(db *sql.DB) error {
+	for _, m := range migrations {
+		var n int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, m.table, m.column).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			if _, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", m.table, m.column, m.def)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // Store is a SQLite-backed history.
 type Store struct{ db *sql.DB }
 
@@ -52,6 +73,10 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("init schema: %w", err)
+	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate schema: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -91,7 +116,7 @@ func (s *Store) Record(ctx context.Context, probe string, at time.Time, checks m
 			return nil, err
 		}
 		cur := api.CheckState{
-			CheckID: r.CheckID, Probe: probe, Flow: c.Flow, Port: c.Port.String(),
+			CheckID: r.CheckID, Probe: probe, Flow: c.Flow, From: c.From, To: c.To, Port: c.Port.String(),
 			Expect: string(c.Expect), Outcome: r.Outcome, Pass: r.Pass, Detail: r.Detail,
 			Since: at, Seen: at,
 		}
@@ -102,12 +127,13 @@ func (s *Store) Record(ctx context.Context, probe string, at time.Time, checks m
 			changes = append(changes, Change{Check: c, Previous: prev, Current: cur})
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO state(check_id, probe, flow, port, expect, outcome, pass, detail, since, last_seen)
-			VALUES (?,?,?,?,?,?,?,?,?,?)
-			ON CONFLICT(check_id) DO UPDATE SET probe=excluded.probe, flow=excluded.flow, port=excluded.port,
+			INSERT INTO state(check_id, probe, flow, src, dst, port, expect, outcome, pass, detail, since, last_seen)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+			ON CONFLICT(check_id) DO UPDATE SET probe=excluded.probe, flow=excluded.flow,
+				src=excluded.src, dst=excluded.dst, port=excluded.port,
 				expect=excluded.expect, outcome=excluded.outcome, pass=excluded.pass, detail=excluded.detail,
 				since=excluded.since, last_seen=excluded.last_seen`,
-			cur.CheckID, cur.Probe, cur.Flow, cur.Port, cur.Expect, cur.Outcome, cur.Pass, cur.Detail,
+			cur.CheckID, cur.Probe, cur.Flow, cur.From, cur.To, cur.Port, cur.Expect, cur.Outcome, cur.Pass, cur.Detail,
 			cur.Since.Unix(), ts); err != nil {
 			return nil, err
 		}
@@ -118,7 +144,7 @@ func (s *Store) Record(ctx context.Context, probe string, at time.Time, checks m
 // Status returns every known check. A check not seen for staleAfter is stale.
 func (s *Store) Status(ctx context.Context, now time.Time, staleAfter time.Duration) (api.Status, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT check_id, probe, flow, port, expect, outcome, pass, detail, since, last_seen
+		SELECT check_id, probe, flow, src, dst, port, expect, outcome, pass, detail, since, last_seen
 		FROM state ORDER BY flow, check_id`)
 	if err != nil {
 		return api.Status{}, err
@@ -128,7 +154,7 @@ func (s *Store) Status(ctx context.Context, now time.Time, staleAfter time.Durat
 	for rows.Next() {
 		var cs api.CheckState
 		var since, seen int64
-		if err := rows.Scan(&cs.CheckID, &cs.Probe, &cs.Flow, &cs.Port, &cs.Expect, &cs.Outcome,
+		if err := rows.Scan(&cs.CheckID, &cs.Probe, &cs.Flow, &cs.From, &cs.To, &cs.Port, &cs.Expect, &cs.Outcome,
 			&cs.Pass, &cs.Detail, &since, &seen); err != nil {
 			return api.Status{}, err
 		}
@@ -162,8 +188,8 @@ func getState(ctx context.Context, q querier, id string) (*api.CheckState, error
 	var cs api.CheckState
 	var since, seen int64
 	err := q.QueryRowContext(ctx, `
-		SELECT check_id, probe, flow, port, expect, outcome, pass, detail, since, last_seen
-		FROM state WHERE check_id = ?`, id).Scan(&cs.CheckID, &cs.Probe, &cs.Flow, &cs.Port,
+		SELECT check_id, probe, flow, src, dst, port, expect, outcome, pass, detail, since, last_seen
+		FROM state WHERE check_id = ?`, id).Scan(&cs.CheckID, &cs.Probe, &cs.Flow, &cs.From, &cs.To, &cs.Port,
 		&cs.Expect, &cs.Outcome, &cs.Pass, &cs.Detail, &since, &seen)
 	if err == sql.ErrNoRows {
 		return nil, nil
