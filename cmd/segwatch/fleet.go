@@ -22,6 +22,7 @@ import (
 	"github.com/Juanen47/segwatch/internal/api"
 	"github.com/Juanen47/segwatch/internal/controller"
 	"github.com/Juanen47/segwatch/internal/pki"
+	"github.com/Juanen47/segwatch/internal/report"
 	"github.com/Juanen47/segwatch/internal/store"
 	"github.com/Juanen47/segwatch/internal/tokens"
 )
@@ -362,5 +363,74 @@ func cmdAlert(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "sent a test alert to %d channels\n", len(pol.Alerts))
+	return 0
+}
+
+func cmdReport(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	data := fs.String("data", "", "controller data directory (required)")
+	out := fs.String("o", "", "write the HTML here (default: standard output)")
+	days := fs.Int("days", 30, "history window for uptime and changes, in days")
+	stale := fs.Duration("stale", 0, "mark checks not seen for this long as stale (default: 3 policy intervals)")
+	pol, ok := loadPolicy(fs, args, stderr)
+	if !ok {
+		return 2
+	}
+	if *data == "" || *days <= 0 {
+		fmt.Fprintln(stderr, "usage: segwatch report -p policy.yaml --data <dir> [-o report.html] [--days 30]")
+		return 2
+	}
+	if *stale <= 0 {
+		*stale = 3 * pol.Defaults.Interval.Std()
+	}
+	raw, err := os.ReadFile(fs.Lookup("p").Value.String())
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	path := filepath.Join(*data, dbFile)
+	if _, err := os.Stat(path); err != nil {
+		fmt.Fprintf(stderr, "no history yet at %s\n", path)
+		return 2
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	defer st.Close()
+
+	rep, err := report.Build(ctx, pol, st, report.Options{
+		Now: time.Now().UTC(), Period: time.Duration(*days) * 24 * time.Hour, StaleAfter: *stale,
+		Version: version, PolicyRaw: raw,
+	})
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	w := stdout
+	var f *os.File
+	if *out != "" {
+		if f, err = os.Create(*out); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		w = f
+	}
+	if err := rep.Render(w); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	if f != nil {
+		if err := f.Close(); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		fmt.Fprintf(stderr, "report written to %s: %d checks, %d failing, %d stale\n", *out, rep.Total, rep.Failing, rep.Stale)
+	}
+	if rep.Failing > 0 || rep.Stale > 0 {
+		return 1
+	}
 	return 0
 }

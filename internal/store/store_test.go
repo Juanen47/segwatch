@@ -89,3 +89,45 @@ func TestNewFailingCheckIsAChange(t *testing.T) {
 		t.Fatalf("got %+v, %v", ch, err)
 	}
 }
+
+func TestHistoryAndTransitions(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	c := policy.Check{Flow: "f", From: "a", To: "b", Port: policy.Port{Number: 22, Proto: policy.TCP}, Expect: policy.Deny}
+	checks := map[string]policy.Check{c.ID(): c}
+	t0 := time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC)
+	for i, pass := range []bool{true, true, false, false, true} {
+		out := "blocked"
+		if !pass {
+			out = "open"
+		}
+		if _, err := s.Record(ctx, "p", t0.Add(time.Duration(i)*time.Hour), checks,
+			[]api.Result{{CheckID: c.ID(), Outcome: out, Pass: pass}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	h, err := s.History(ctx, t0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := h[c.ID()]; got.Runs != 5 || got.Passes != 3 {
+		t.Errorf("history = %+v, want 5 runs, 3 passes", got)
+	}
+	if h, _ := s.History(ctx, t0.Add(4*time.Hour)); h[c.ID()].Runs != 1 {
+		t.Errorf("since filter: %+v", h)
+	}
+
+	tr, err := s.Transitions(ctx, t0, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr) != 2 || !tr[0].Pass || !tr[0].At.Equal(t0.Add(4*time.Hour)) ||
+		tr[1].Pass || !tr[1].At.Equal(t0.Add(2*time.Hour)) || tr[1].Outcome != "open" {
+		t.Errorf("transitions = %+v", tr)
+	}
+}

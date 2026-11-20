@@ -174,3 +174,65 @@ func getState(ctx context.Context, q querier, id string) (*api.CheckState, error
 	cs.Since, cs.Seen = time.Unix(since, 0).UTC(), time.Unix(seen, 0).UTC()
 	return &cs, nil
 }
+
+// Stats counts the runs of one check over a period.
+type Stats struct {
+	Runs   int
+	Passes int
+}
+
+// History returns run and pass counts per check for results at or after since.
+func (s *Store) History(ctx context.Context, since time.Time) (map[string]Stats, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT check_id, COUNT(*), SUM(pass) FROM results WHERE at >= ? GROUP BY check_id`, since.Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]Stats{}
+	for rows.Next() {
+		var id string
+		var st Stats
+		if err := rows.Scan(&id, &st.Runs, &st.Passes); err != nil {
+			return nil, err
+		}
+		out[id] = st
+	}
+	return out, rows.Err()
+}
+
+// Transition is a run whose pass/fail result differs from the run before it.
+type Transition struct {
+	At      time.Time
+	CheckID string
+	Pass    bool
+	Outcome string
+	Detail  string
+}
+
+// Transitions returns the most recent pass/fail flips at or after since,
+// newest first, at most limit of them.
+func (s *Store) Transitions(ctx context.Context, since time.Time, limit int) ([]Transition, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT at, check_id, pass, outcome, detail FROM (
+			SELECT at, check_id, pass, outcome, detail, id,
+				LAG(pass) OVER (PARTITION BY check_id ORDER BY at, id) AS prev
+			FROM results WHERE at >= ?
+		) WHERE prev IS NOT NULL AND prev != pass
+		ORDER BY at DESC, id DESC LIMIT ?`, since.Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Transition
+	for rows.Next() {
+		var t Transition
+		var at int64
+		if err := rows.Scan(&at, &t.CheckID, &t.Pass, &t.Outcome, &t.Detail); err != nil {
+			return nil, err
+		}
+		t.At = time.Unix(at, 0).UTC()
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}

@@ -38,14 +38,15 @@ Controller and probes:
   segwatch token revoke --data <dir> <probe-name>
   segwatch fingerprint --data <dir>
   segwatch status      --data <dir> [--json]
+  segwatch report      -p policy.yaml --data <dir> [-o report.html] [--days 30]
   segwatch alert test  -p policy.yaml
   segwatch probe --controller https://host:8443 --fingerprint sha256:... --token-file <file>
                  [--bind addr] [--source addr]
 
   segwatch version
 
-Exit codes for run: 0 all flows match the policy, 1 at least one does not,
-2 the run could not start.
+Exit codes for run, status and report: 0 everything matches the policy,
+1 at least one check does not (or is stale), 2 the command could not run.
 
 Only use segwatch on networks you own or are authorised in writing to test.
 `
@@ -79,6 +80,8 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		return cmdStatus(args[1:], stdout, stderr)
 	case "probe":
 		return cmdProbe(ctx, args[1:], stderr)
+	case "report":
+		return cmdReport(ctx, args[1:], stdout, stderr)
 	case "alert":
 		return cmdAlert(args[1:], stdout, stderr)
 	case "version", "--version", "-v":

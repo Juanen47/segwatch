@@ -5,7 +5,7 @@ talk to which, on which ports. Small probes inside each network test those
 flows and tell you when reality drifts from the policy.
 
 > Status: early draft (v0.1 in progress). Single-host mode, probes, the
-> controller, its history and alerts work today; reports are on the way.
+> controller, its history, alerts and the HTML report work today.
 > [Leer en español](README.es.md).
 
 ## Why
@@ -125,6 +125,25 @@ segwatch status --data /var/lib/segwatch   # exit 1 if any check fails or is sta
   and results it sends for anything else are discarded.
 * History lives in SQLite; state changes (pass to fail and back) are logged.
 
+### Report
+
+```sh
+segwatch report -p policy.yaml --data /var/lib/segwatch -o report.html   # --days 30 by default
+```
+
+One self-contained HTML page, with no scripts and no external resources, so
+you can archive it or attach it to an audit:
+
+* a matrix of source networks against destinations, one badge per check
+  (✓ matches the policy, ✗ does not, ? stale, … not run yet);
+* every check with its expected and observed result, since when, and the
+  share of runs that matched the policy over the period;
+* the recent changes (broke / recovered);
+* the policy's SHA-256 hash, so the report names the exact policy it checked.
+
+It exits 1 when any check fails or is stale, so a cron job can mail it only
+when something is wrong. It reads the history and needs no running controller.
+
 ### Alerts
 
 The controller sends alerts to the channels listed under `alerts:` in the
@@ -169,6 +188,7 @@ cd examples/lab
 ./lab.sh status   # the 5 guest-to-server checks now FAIL
 ./lab.sh heal     # undo it; back to 0 failing
 ./lab.sh alerts   # what ntfy, the webhook and Healthchecks received
+./lab.sh report   # writes examples/lab/report.html
 ./lab.sh down
 ```
 
@@ -187,7 +207,7 @@ go test ./...
 - [x] Controller: probes authenticate with a token over pinned TLS and pull their checks
 - [x] Scheduling on the probe, SQLite history and state-change detection
 - [x] Alerts: webhook, ntfy, Healthchecks
-- [ ] HTML report with the expected-vs-observed matrix
+- [x] HTML report with the expected-vs-observed matrix
 - [ ] Checkmk local check and Prometheus metrics
 - [ ] IPv6 flows, release binaries
 
