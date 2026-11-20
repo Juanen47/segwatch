@@ -50,6 +50,14 @@ small, declarative, always-on check that fits next to your monitoring.
 | `refused` | Real host answered with a reset: the packet arrived           | fail    | fail   |
 | `blocked` | Timeout, unreachable, or reset in front of a listening probe  | fail    | pass   |
 | `unknown` | UDP to a real host stayed silent: cannot tell                 | fail    | fail   |
+| `unverified` | Looked blocked, but the destination probe is down (controller only) | –  | fail   |
+
+A silent destination looks exactly like a firewall that drops traffic, so
+the controller only trusts a `deny` towards a probe while that probe is in
+contact with it. If the destination probe has not polled for longer than
+`--stale` (3 intervals by default), a passing `deny` towards it is recorded
+as `unverified` and counts as failing. A probe whose responder cannot listen
+exits instead of polling, so a broken responder is caught the same way.
 
 ## Policy
 
@@ -219,6 +227,8 @@ cd examples/lab
 ./lab.sh drift    # simulate a firewall mistake: guests reach the servers
 ./lab.sh status   # the 5 guest-to-server checks now FAIL
 ./lab.sh heal     # undo it; back to 0 failing
+./lab.sh outage   # stop the servers probe: after ~40s its denies are "unverified"
+./lab.sh restore  # start it again; back to 0 failing
 ./lab.sh alerts   # what ntfy, the webhook and Healthchecks received
 ./lab.sh report   # writes examples/lab/report.html
 ./lab.sh metrics  # Prometheus metrics from the controller

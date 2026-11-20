@@ -51,6 +51,15 @@ permanente que se integra con tu monitorización.
 | `refused` | El equipo real respondió con un reset: el paquete llegó                | falla   | falla  |
 | `blocked` | Tiempo agotado, inalcanzable, o reset delante de una sonda que escucha | falla   | cumple |
 | `unknown` | UDP a un equipo real sin respuesta: no se puede saber                  | falla   | falla  |
+| `unverified` | Parecía bloqueado, pero la sonda de destino está caída (solo con controlador) | – | falla |
+
+Un destino caído no se distingue de un firewall que descarta el tráfico, así
+que el controlador solo se fía de un `deny` hacia una sonda mientras esa sonda
+siga en contacto con él. Si la sonda de destino lleva más de `--stale` sin
+dar señales (3 intervalos por defecto), un `deny` que parecía cumplirse se
+guarda como `unverified` y cuenta como fallo. Una sonda cuyo respondedor no
+puede escuchar se cierra en vez de seguir consultando, así que un respondedor
+roto se detecta igual.
 
 ## Política
 
@@ -227,6 +236,8 @@ cd examples/lab
 ./lab.sh drift    # simula un error en el cortafuegos: invitados llega a servidores
 ./lab.sh status   # las 5 pruebas de invitados a servidores FALLAN
 ./lab.sh heal     # lo deshace; vuelve a 0 fallos
+./lab.sh outage   # para la sonda de servidores: a los ~40 s sus deny salen "unverified"
+./lab.sh restore  # la vuelve a arrancar; vuelve a 0 fallos
 ./lab.sh alerts   # lo que han recibido ntfy, el webhook y Healthchecks
 ./lab.sh report   # genera examples/lab/report.html
 ./lab.sh metrics  # métricas de Prometheus del controlador
