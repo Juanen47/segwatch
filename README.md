@@ -194,7 +194,7 @@ policy:
 | Type           | What it gets                                                                 |
 |----------------|------------------------------------------------------------------------------|
 | `ntfy`         | A short message per batch of changes: failing (high priority), recovered, probe silent, reporting again |
-| `webhook`      | The same events as JSON: `{"source":"segwatch","events":[{check_id, flow, from, to, port, expect, outcome, pass, previous_outcome, kind, at}]}` |
+| `webhook`      | The same events as JSON: `{"source":"segwatch","events":[{check_id, flow, from, to, port, expect, outcome, pass, previous_outcome, kind, at, last_seen}]}` |
 | `healthchecks` | A heartbeat every interval (at most 5 min): success when every check passes and none is stale, `/fail` with the failing list otherwise. If the controller dies, the pings stop and Healthchecks alerts you |
 
 ```yaml

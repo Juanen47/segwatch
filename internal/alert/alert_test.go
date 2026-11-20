@@ -234,3 +234,22 @@ func TestQuietAtStartup(t *testing.T) {
 		t.Fatalf("want one alert for the still-failing check, got %+v", hits)
 	}
 }
+
+func TestSummaryStale(t *testing.T) {
+	seen := time.Date(2026, 11, 20, 17, 51, 50, 0, time.UTC)
+	ev := []Event{
+		{Kind: "stale", Flow: "f", Port: "22/tcp", At: seen.Add(40 * time.Second), LastSeen: seen},
+		{Kind: "stale", Flow: "f", Port: "icmp", At: seen.Add(40 * time.Second), LastSeen: seen},
+	}
+	title, text, bad := Summary(ev)
+	if title != "segwatch: 2 check(s) stale" || !bad {
+		t.Errorf("title = %q", title)
+	}
+	if !strings.Contains(text, "no result since 2026-11-20T17:51:50Z") {
+		t.Errorf("text does not use the last result time:\n%s", text)
+	}
+	title, _, _ = Summary(append(ev, Event{Kind: "failing"}, Event{Kind: "recovered"}))
+	if title != "segwatch: 1 failing, 2 stale, 1 recovered" {
+		t.Errorf("mixed title = %q", title)
+	}
+}

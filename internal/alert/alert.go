@@ -40,6 +40,7 @@ type Event struct {
 	Previous string    `json:"previous_outcome,omitempty"`
 	Kind     string    `json:"kind"` // failing, recovered, stale, reporting
 	At       time.Time `json:"at"`
+	LastSeen time.Time `json:"last_seen,omitzero"` // last result, for stale and reporting events
 }
 
 // Payload is the JSON body posted to a webhook.
@@ -212,7 +213,7 @@ func (d *Dispatcher) Heartbeat(st api.Status) {
 func stateEvent(c api.CheckState, kind string, at time.Time) Event {
 	return Event{
 		CheckID: c.CheckID, Flow: c.Flow, From: c.From, To: c.To, Port: c.Port, Expect: c.Expect,
-		Outcome: c.Outcome, Pass: c.Pass, Detail: c.Detail, Kind: kind, At: at,
+		Outcome: c.Outcome, Pass: c.Pass, Detail: c.Detail, Kind: kind, At: at, LastSeen: c.Seen,
 	}
 }
 
@@ -294,8 +295,11 @@ func (d *Dispatcher) ping(ctx context.Context, a policy.Alert, st api.Status) er
 	if st.Failing > 0 || st.Stale > 0 {
 		url += "/fail"
 		for _, c := range st.Checks {
-			if !c.Pass {
+			switch {
+			case !c.Pass:
 				text += fmt.Sprintf("FAIL %s %s: expected %s, observed %s\n", c.Flow, c.Port, c.Expect, c.Outcome)
+			case st.Generated.Sub(c.Seen) > d.StaleAfter:
+				text += fmt.Sprintf("STALE %s %s: no result since %s\n", c.Flow, c.Port, c.Seen.Format(time.RFC3339))
 			}
 		}
 	}
@@ -329,16 +333,22 @@ func (d *Dispatcher) post(ctx context.Context, url string, hdr http.Header, body
 func Summary(events []Event) (title, text string, failing bool) {
 	sorted := append([]Event(nil), events...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].CheckID < sorted[j].CheckID })
-	var bad, good int
+	var bad, good, failed, stale int
 	var b strings.Builder
 	for _, e := range sorted {
 		switch e.Kind {
 		case "failing":
 			bad++
+			failed++
 			fmt.Fprintf(&b, "FAIL %s %s: expected %s, observed %s", e.Flow, e.Port, e.Expect, e.Outcome)
 		case "stale":
 			bad++
-			fmt.Fprintf(&b, "STALE %s %s: no result since %s", e.Flow, e.Port, e.At.Format(time.RFC3339))
+			stale++
+			since := e.LastSeen
+			if since.IsZero() {
+				since = e.At
+			}
+			fmt.Fprintf(&b, "STALE %s %s: no result since %s", e.Flow, e.Port, since.Format(time.RFC3339))
 		case "recovered":
 			good++
 			fmt.Fprintf(&b, "OK %s %s: back to %s", e.Flow, e.Port, e.Outcome)
@@ -351,13 +361,23 @@ func Summary(events []Event) (title, text string, failing bool) {
 		}
 		b.WriteByte('\n')
 	}
-	switch {
-	case bad > 0 && good > 0:
-		title = fmt.Sprintf("segwatch: %d failing, %d recovered", bad, good)
-	case bad > 0:
-		title = fmt.Sprintf("segwatch: %d check(s) failing", bad)
+	var parts []string
+	for _, p := range []struct {
+		n    int
+		what string
+	}{{failed, "failing"}, {stale, "stale"}, {good, "recovered"}} {
+		if p.n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", p.n, p.what))
+		}
+	}
+	switch len(parts) {
+	case 0:
+		title = "segwatch: no changes"
+	case 1:
+		n, what, _ := strings.Cut(parts[0], " ")
+		title = fmt.Sprintf("segwatch: %s check(s) %s", n, what)
 	default:
-		title = fmt.Sprintf("segwatch: %d check(s) recovered", good)
+		title = "segwatch: " + strings.Join(parts, ", ")
 	}
 	return title, b.String(), bad > 0
 }

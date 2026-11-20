@@ -30,7 +30,8 @@ up)
   docker compose up -d
   echo "wait ~20s, then: ./lab.sh status"
   ;;
-status) sw status --data /lab/data --stale 1m ;;
+# 30s = 3 policy intervals, the same threshold the controller alerts on
+status) sw status --data /lab/data --stale 30s ;;
 drift)
   # simulate a firewall mistake: guests can now reach the servers network
   if [ "${IPV6:-0}" = 1 ]; then
@@ -53,7 +54,7 @@ report)
   sw report -p /lab/$POLICY --data /lab/data -o /lab/data/report.html || true
   cp data/report.html report.html && echo "open examples/lab/report.html" ;;
 metrics) docker compose exec -T alerts wget -qO- http://172.31.10.10:9469/metrics ;;
-checkmk) sw checkmk --data /lab/data --stale 1m ;;
+checkmk) sw checkmk --data /lab/data --stale 30s ;;
 alerts) docker compose exec -T alerts cat /tmp/alerts.log 2>/dev/null || echo "no alerts yet" ;;
 down) docker compose down -v; rm -rf data segwatch report.html ;;
 *) echo "usage: $0 up|status|drift|heal|outage|restore|alerts|report|metrics|checkmk|down" >&2; exit 2 ;;
